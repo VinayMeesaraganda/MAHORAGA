@@ -88,7 +88,29 @@ computed. The broker connector supplies `sector` and `industry` per symbol;
 Alpaca does not. Would also enable a correlation cap — five positions in one
 sector is one bet, not five.
 
-## 8. Bounded automatic adaptation, once the sample supports it
+## 8. The feedback loop can harm as easily as help — measure it
+
+Showing the model its own record is untested and carries two specific failure
+modes, both of which look like learning while degrading results.
+
+**Gun-shy after a normal drawdown.** A positive-expectancy system with a 50% hit
+rate produces three consecutive losses roughly one month in eight. A model that
+reads "3 losses, -2.1R" and starts refusing valid setups has been harmed by the
+feedback, not helped. The prompt says "weigh it, do not obey it", which is a
+wording, not a control.
+
+**Exploration freeze.** If the model sees a catalyst type at a poor average over
+six trades and stops taking it, no further evidence about that type is ever
+gathered, and a noisy six-trade estimate becomes permanent. Small samples make
+this acute, and it is self-reinforcing in a way that ordinary overfitting is not.
+
+Both are measurable once trades exist: compare entry rates and per-type
+selection before and after the record became non-empty, and check whether
+refusals cluster after losing streaks. If either shows up, the answer is
+probably to withhold the aggregate until a minimum sample exists per category
+rather than to reword the prompt.
+
+## 9. Bounded automatic adaptation, once the sample supports it
 
 Learnings currently reach the model through the prompt only. Some adaptation
 could eventually be made deterministic and safe, but not before the samples
@@ -99,7 +121,7 @@ clearly negative realised R over thirty-plus trades is the first candidate.
 Nothing in this class should touch position size, stop distance or any policy
 limit.
 
-## 9. Post-exit review pass
+## 10. Post-exit review pass
 
 Exit attribution runs when the trade closes, so it cannot see whether the name
 recovered afterwards — the cleanest evidence that a stop was too tight rather
@@ -107,7 +129,7 @@ than a thesis being wrong. The ATR test stands in for now. A pass that revisits
 closed entries a few days later and fills `recovered_to_pct` would separate
 "stopped by noise" from "genuinely wrong" far more reliably than the proxy does.
 
-## 10. Earnings catalysts still arrive by hand
+## 11. Earnings catalysts still arrive by hand
 
 `config/catalysts.json` is populated manually from the broker earnings calendar
 and pushed with `npm run paper:catalysts`. The connector is available to a
