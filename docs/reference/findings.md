@@ -47,3 +47,56 @@ See [runtime improvements](runtime-improvements.md): previous-close equity now s
 - No real-money or paper orders placed during setup.
 
 Pending: model key and authenticated research, source availability, full paper order/fill lifecycle, corrected loss accounting, cloud identity/resources, public fork/username, OAuth registration and resumed official leaderboard syncing.
+
+## External review, 12 Sep 2026 — two claims measured
+
+A review argued the decision layer is overbuilt relative to any demonstrated
+edge. Two of its claims were checkable against data already in hand, and both
+hold.
+
+**The relative-volume gate is a clock.** `rel_volume` compares the current
+minute against the previous session's *average* minute, with no adjustment for
+where in the session we are. Across 20,670 five-minute bars, the share of bars
+clearing the 1.5x threshold runs from 71% in the first half hour to 3% around
+13:00 ET, recovering to 34% into the close. Median relative volume by that
+definition is 2.00 at the open and 0.49 at lunch. The gate does not measure
+participation; it measures the time of day, and it is roughly twenty times more
+permissive at 09:30 than at 13:00. Comparing against the same slot on prior
+sessions is the fix; leaving it as-is means an unintended "trade near the open"
+rule is running.
+
+**The 2R target is largely fiction.** Holding the entry set fixed and varying
+only the exit policy — the counterfactual design, since comparing gap-captured
+trades against trades that ran to a stop selects on the price path — over 4,090
+entries across ten names and five years:
+
+| Exit policy | mean | win rate | avg win | avg loss |
+|---|---:|---:|---:|---:|
+| Full ladder | +0.081R | 55% | +0.56R | -0.51R |
+| Stop / target / time only | +0.076R | 55% | +0.56R | -0.51R |
+
+The target is reached on **1.0%** of ladder trades and 1.8% of simple ones. The
+five-day hold, the trail arming at 1.5R and gap capture at 1.5R between them
+ensure that almost nothing runs to 2R, so the advertised risk-reward is not the
+realised one. The entire ladder is worth +0.005R per trade against a plain
+stop/target/time exit, which on this sample is nothing.
+
+These are unconditional entries, not catalyst-selected ones, and the intrabar
+assumption is pessimistic (the adverse extreme is assumed to be reached first).
+A selective system may well realise a different path distribution. But the
+structural point does not depend on selection: a 2R target with a five-day
+ceiling and two rules that cut winners at 1.5R cannot produce 2R winners often.
+
+**The arithmetic that follows.** At `risk_per_trade_pct` 0.25 and roughly 13
+trades a month, +0.081R is **0.26% a month before costs**, against a 2-3%
+target — short by a factor of eight to eleven. Reaching 2% requires **0.62R
+average across all trades**, and the measured average *winner* is 0.56R. Every
+trade could win and the target would still be missed. Either the return target
+or the risk unit has to move, and only one of them is a preference.
+
+**Fixed in response:** `paper:review` declared a hypothesis "supported" when one
+mean exceeded another after both groups reached their sample. Sample size alone
+ignores variance and repeated comparisons. It now reports Welch's t with a
+Bonferroni-adjusted threshold over the number of registered questions, returns
+INCONCLUSIVE when the difference sits inside the noise, and states that trades
+opened in the same regime are correlated, so even that overstates confidence.

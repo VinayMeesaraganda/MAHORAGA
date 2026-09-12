@@ -69,6 +69,28 @@ console.log("\n  These are checked by reading a session's logs, not by statistic
 console.log("  Until they all pass, no statistical question is worth asking.");
 
 console.log("\nTIER 2 — does the strategy work? (needs sample)\n");
+
+/** Welch's t — unequal variances, which two strategy groups will always have. */
+function welch(a, b) {
+  if (a.length < 2 || b.length < 2) return { t: Number.NaN, df: 1 };
+  const m = (x) => x.reduce((s, v) => s + v, 0) / x.length;
+  const v = (x) => { const mu = m(x); return x.reduce((s, q) => s + (q - mu) ** 2, 0) / (x.length - 1); };
+  const va = v(a) / a.length, vb = v(b) / b.length;
+  if (va + vb === 0) return { t: Number.NaN, df: 1 };
+  const df = (va + vb) ** 2 / (va ** 2 / (a.length - 1) + vb ** 2 / (b.length - 1));
+  return { t: (m(a) - m(b)) / Math.sqrt(va + vb), df };
+}
+
+/** Two-sided critical t. Normal approximation with a small-sample inflation. */
+function criticalT(alpha, df) {
+  const p = 1 - alpha / 2;
+  // Acklam-style inverse normal, adequate for a threshold we print rather than publish.
+  const q = p - 0.5, r = q * q;
+  const z = q * (((-25.44106049637 * r + 41.39119773534) * r - 18.61500062529) * r + 2.506628277459) /
+            ((((3.13082909833 * r - 21.06224101826) * r + 23.08336743743) * r - 8.47351093090) * r + 1);
+  return z * (1 + (z * z + 1) / (4 * df));
+}
+
 const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null);
 const pick = (spec) => {
   const [dim, val] = spec.split(":");
@@ -97,11 +119,26 @@ for (const h of hypotheses.statistical) {
     const short = Math.max(need - a.length, need - b.length);
     console.log(`      NOT ANSWERABLE — ${short} more trade(s) needed in the thinner group.`);
   } else {
-    const ra = mean(a.map((x) => x.r).filter((r) => r !== null));
-    const rb = mean(b.map((x) => x.r).filter((r) => r !== null));
-    const verdict = ra > rb ? "supported" : "NOT supported";
-    console.log(`      ${ra?.toFixed(2)}R vs ${rb?.toFixed(2)}R — ${verdict}`);
-    console.log(`      falsified if: ${h.falsified_if}`);
+    const xa = a.map((x) => x.r).filter((r) => r !== null);
+    const xb = b.map((x) => x.r).filter((r) => r !== null);
+    const ra = mean(xa), rb = mean(xb);
+    // One mean exceeding another is not a result. Welch's t does not assume
+    // equal variance, and the threshold is Bonferroni-adjusted for the number
+    // of questions registered, because every one of them is tested on the same
+    // record and the more you ask the more one clears by chance.
+    const { t, df } = welch(xa, xb);
+    const k = hypotheses.statistical.length;
+    const crit = criticalT(0.05 / k, df);
+    const decisive = Number.isFinite(t) && Math.abs(t) >= crit;
+    console.log(`      ${ra?.toFixed(2)}R vs ${rb?.toFixed(2)}R   t=${t.toFixed(2)} df=${df.toFixed(0)}`);
+    console.log(`      threshold |t| >= ${crit.toFixed(2)} (two-sided 0.05, Bonferroni over ${k} questions)`);
+    if (!decisive) {
+      console.log(`      INCONCLUSIVE — the sample is reached but the difference is inside the noise.`);
+    } else {
+      console.log(`      ${t > 0 ? "supported" : "NOT supported"} — falsified if: ${h.falsified_if}`);
+    }
+    console.log(`      Caveat: trades opened in the same regime are correlated, so even this`);
+    console.log(`      overstates confidence. Treat it as a floor, not a licence.`);
   }
   console.log("");
 }
