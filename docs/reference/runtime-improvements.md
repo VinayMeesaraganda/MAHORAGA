@@ -988,6 +988,56 @@ The comparison was registered in `config/hypotheses.json` before the source
 produced a single trade: do insider clusters beat earnings beats, falsified if
 they do not, twenty-five per group.
 
+## Adverse detection was too literal — September 12, 2026
+
+Tested against a real trade that went wrong: entered on a cybersecurity-attack
+headline assuming production was unaffected, and days later the company said it
+would miss the quarter. Running realistic phrasings of that second event through
+the classifier showed only two of eight were caught. The pattern required a
+literal "cuts guidance" or "withdraws guidance", so ordinary wordings of the
+identical event passed straight through, including "lowers full-year outlook",
+which is a textbook guidance cut.
+
+Widened to cover how the event is actually written:
+
+- Cut, lower, reduce, trim, slash, scale back, pull, suspend or withdraw applied
+  to guidance, outlook, forecast, target, estimates or projections, in either
+  word order.
+- Forward shortfalls that never use the word guidance: warnings of revenue
+  falling short or below consensus, missing targets, material impact on revenue
+  or production, and production, supply or shipment disruption.
+- Security incidents, including the standard corporate phrasing "cybersecurity
+  incident" alongside cyberattack, ransomware and data breach.
+
+Eight of eight now match, and the favourable catalysts sitting beside them still
+classify unchanged — a widened adverse list that swallowed guidance raises or
+earnings beats would have been worse than the gap it fixed. The eight phrasings
+are kept as regression cases.
+
+### Reaction latency
+
+From a story appearing in the feed to the sell being submitted:
+
+| | |
+|---|---|
+| Wait for the next gather | up to 120s |
+| Gather flags the issuer | — |
+| Next alarm runs exits | up to 30s |
+| **Total** | **up to ~2.5 minutes** |
+
+Exits run on every alarm ahead of optional work, so the exit itself is never
+queued behind research. What this does not cover, and cannot, is how long the
+news feed takes to carry the story — that term dominates and is outside the
+system's control.
+
+### What it would still not have done
+
+It would not have taken the original trade, because a cybersecurity attack
+matches no catalyst pattern and the entry gate requires one. That is the right
+outcome for the wrong reason: the event is absent from the vocabulary rather
+than judged and declined. Buying bad news on the view that the market has
+overreacted is a contrarian thesis, and this system does not hold one.
+
 ## Diagnostics and reusable instructions
 
 ```bash

@@ -112,3 +112,58 @@ describe("meetsQuality and bestCatalyst", () => {
     expect(bestCatalyst(undefined)).toBeNull();
   });
 });
+
+describe("adverse detection against a real trade that went wrong", () => {
+  // From a live example: entered on a cyberattack headline assuming production
+  // was unaffected; days later the company said it would miss the quarter. The
+  // original pattern list only matched a literal "cuts guidance", so five of
+  // seven ordinary phrasings of that same event were missed.
+  const sameEventDifferentWords = [
+    "Boston Scientific cuts guidance after cyberattack disrupts production",
+    "Boston Scientific withdraws guidance citing cyberattack",
+    "Boston Scientific says cyberattack will cause it to miss Q4 targets",
+    "Boston Scientific warns fourth-quarter revenue will fall short of expectations",
+    "Boston Scientific lowers full-year outlook on attack-related disruption",
+    "BSX expects production shortfall to weigh on next quarter results",
+    "Boston Scientific: attack to have material impact on Q4 revenue",
+    "Boston Scientific confirms cybersecurity incident, says operations continuing",
+  ];
+
+  it("catches a forward guidance cut however it is worded", () => {
+    for (const h of sameEventDifferentWords) {
+      expect(adverseCatalystReason(h), h).toBeTruthy();
+    }
+  });
+
+  it("catches the phrasings that do not use the word guidance", () => {
+    expect(adverseCatalystReason("Acme lowers full-year outlook")).toBeTruthy();
+    expect(adverseCatalystReason("Acme trims its revenue forecast")).toBeTruthy();
+    expect(adverseCatalystReason("Acme suspends guidance")).toBeTruthy();
+    expect(adverseCatalystReason("Acme warns results will be below consensus")).toBeTruthy();
+    expect(adverseCatalystReason("Acme flags a production shortfall")).toBeTruthy();
+  });
+
+  it("treats a security incident as adverse for a name already held", () => {
+    for (const h of [
+      "Acme confirms cybersecurity incident",
+      "Acme discloses ransomware attack",
+      "Acme reports data breach affecting customers",
+    ]) {
+      expect(adverseCatalystReason(h), h).toBeTruthy();
+    }
+  });
+
+  it("does not turn favourable events adverse", () => {
+    // The widened patterns must not swallow the catalysts they sit beside.
+    for (const [h, type] of [
+      ["Acme raises full-year guidance after strong quarter", "guidance"],
+      ["Nvidia tops Q3 earnings estimates", "earnings"],
+      ["Palantir wins $480 million defense contract", "contract"],
+      ["FDA approves Biogen therapy for rare disease", "regulatory"],
+      ["XYZ agrees to acquire ABC in merger agreement", "m_and_a"],
+    ] as const) {
+      expect(adverseCatalystReason(h), h).toBeNull();
+      expect(classifyCatalyst(h)?.type, h).toBe(type);
+    }
+  });
+});
