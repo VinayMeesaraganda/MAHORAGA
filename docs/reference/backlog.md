@@ -153,3 +153,30 @@ has never turned over is the wrong order. Revisit once there is a live record.
 The design generalises: any gate threshold can be tested this way without
 risking capital, which makes it the highest-value item on this list once the
 operational tier passes.
+
+## 13. The filing that moves the stock may be a 10-Q
+
+Oracle, 11 September 2026. The stock opened +7.5% on a 15% earnings beat and
+closed -1.7%, nine and a half percent off its high, because regulatory filings
+that morning revealed Larry Ellison had adopted a 10b5-1 plan on 22 June to sell
+up to 50 million shares — roughly $7.5bn — running to 24 October. He cancelled
+it the next day, with no stock sold.
+
+The system could not see the event that caused the move. `sec.ts` requests
+`type=8-K` and `insider.ts` requests `type=4`. A 10b5-1 *adoption* is neither: no
+transaction occurs, so no Form 4 is filed, and the disclosure lived in the 10-Q.
+The cancellation, by contrast, came as a press release and is visible to the news
+gatherer.
+
+Deliberately not fixed by pattern-matching insider sale headlines. Routine
+10b5-1 adoptions are constant and mostly meaningless — executives sell on
+schedule. What made this one move the stock was magnitude relative to a founder
+who holds about 40% of the company and famously never sells, borrowing against
+the stake instead. Judging that needs a baseline of an insider's historical
+behaviour and holdings, which the system does not keep. A bare "insider plans to
+sell" rule would fire on ordinary sales and cause exits on noise — worse than
+missing this.
+
+The tractable version is to extend the EDGAR gatherer to 10-Q/10-K and extract
+the 10b5-1 disclosure block, then score it against the filer's holdings. That is
+real work and belongs after the operational tier passes.
