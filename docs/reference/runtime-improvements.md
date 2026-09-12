@@ -1150,3 +1150,53 @@ No model key, cloud deployment, or official leaderboard registration was added. 
 ## Verification
 
 Worker type checking and all 214 unit tests pass. The personal skill passes the bundled validator. Local smoke checks confirm the profile is applied (10-minute preparation, staleness exits off), account equity is $100,000, budget state is exposed, the dashboard proxy returns HTTP 200, and enable without a model key returns HTTP 409 while status remains disabled. No orders or paid model requests were sent.
+
+## An RSI band is a claim about geometry, not direction
+
+A chart setup was offered for review: three RSI lengths with bands at 55/45, an
+EMA 23, a session VWAP, pivots at 20/20, and a displaced EMA. Tested against
+12,620 daily bars and 20,670 five-minute bars across ten large caps.
+
+Almost all of it measured zero. Close above EMA 23 is worth +0.01% over five
+days and +0.07% over twenty. RSI 9, 14 and 21 correlate at 0.93-0.97, and
+requiring all three to agree returns exactly the same edge as one of them while
+discarding a sixth of the sample — the confirmation costs trades and adds no
+information. Intraday, the VWAP reclaim is flat zero, and adding an RSI filter
+to it turns it negative. The largest intraday edge found anywhere was 0.037%
+against a round-trip cost of 0.02-0.05%: the spread eats it whole. This is the
+measured reason the strategy is catalyst-driven rather than indicator-driven.
+Indicator edges at intraday horizons are basis points; catalyst edges are
+percent.
+
+One element survived, and only once it was read correctly. Used as a *filter*
+rather than a signal, the middle of the RSI range marks setups whose forward
+excursion is symmetric: MFE 5.93% against MAE -5.81%, a ratio of 1.02, versus
+1.23 outside. The zone is not quiet — it trends marginally cleaner and moves
+marginally further than the rest of the tape — so the usual "it's chop"
+explanation is wrong. What is missing is asymmetry, and asymmetry is exactly
+what `target_r_multiple` spends. A 2R target on a setup whose favourable and
+adverse excursions are equal is arithmetic the price path will not honour.
+
+Registered as `rsi-dead-band` rather than enforced. The boundary was fitted on
+the sample it was tested on, which is disqualifying for a live gate and
+acceptable for a question. `rsi_14` was already captured in the thesis gates
+block, so no instrumentation was needed; `paper:review` gained an `rsi_band`
+dimension and nothing in the trading path changed.
+
+Three decisions worth recording, because each was a live option that was
+rejected:
+
+**No veto, even if it is supported.** The band covers 27% of gate-passing
+candidates. This system already has seven ways to refuse a trade and has taken
+none; the binding constraint is too few trades, not too many. If the question
+resolves, the response is a lower target multiple in-band — keep the trade, stop
+asking the path for a move it does not make.
+
+**No shadow-logging subsystem now.** It would answer the question in weeks
+instead of a year, and it is the right design, but it means new persisted state
+and a deferred resolver inside an alarm chain that has not yet survived a full
+session. Filed as backlog item 12.
+
+**No change to the gate or to `target_r_multiple`.** Both were tempting and both
+would have been parameters fitted on one in-sample backtest of ten surviving
+names — the precise failure `experiments.md` exists to prevent.

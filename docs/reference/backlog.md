@@ -136,3 +136,20 @@ and pushed with `npm run paper:catalysts`. The connector is available to a
 Claude session, not to the Worker, so this cannot currently be automated from
 inside the loop. A scheduled task that refreshes the file after each earnings
 day would close it.
+
+## 12. Shadow measurement on rejected candidates
+
+`rsi-dead-band` is registered against realised trades, which at roughly 0.8
+in-band trades a week takes over a year to answer. The same question measured on
+every *evaluated* candidate — band membership at evaluation time, then forward
+10-day MFE/MAE whether or not the trade was taken — reaches the same confidence
+in weeks, because the system evaluates far more names than it buys.
+
+Deliberately not built yet. It needs a new persisted store, a resolver pass that
+runs ten days later, and pruning, all inside an alarm chain that has not yet
+survived a full live session. Adding a measurement subsystem to an engine that
+has never turned over is the wrong order. Revisit once there is a live record.
+
+The design generalises: any gate threshold can be tested this way without
+risking capital, which makes it the highest-value item on this list once the
+operational tier passes.

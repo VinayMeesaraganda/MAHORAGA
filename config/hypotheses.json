@@ -107,6 +107,22 @@
       "falsified_if": "gap capture underperforms, which would mean the gap continues more often than it fades and the rule is cutting winners",
       "note": "Tension with post-earnings drift: the literature says the move continues, while a live example gave the whole gap back overnight. Set at 1.5R to match the trail arm rather than to fit that one trade; 1.0R would have caught it but cuts more winners.",
       "registered": "2026-09-12, before the rule has fired once"
+    },
+    {
+      "id": "rsi-dead-band",
+      "question": "Do entries taken with RSI(14) in 40-52 realise a lower mean R than entries outside that band?",
+      "compare": [
+        "rsi_band:40-52",
+        "rsi_band:outside"
+      ],
+      "min_effect_r": 0.5,
+      "min_per_group": 64,
+      "falsified_if": "in-band mean R is equal or higher once both groups reach the sample, or the sign flips between two consecutive reviews",
+      "mechanism": "Sizing sets the target at target_r_multiple x stop. That arithmetic only pays if forward travel is asymmetric. Measured over 10 days on 12,620 daily bars, MFE/MAE inside the band is 1.18 against 1.35 outside it, conditional on the 52w and range-position gates already applied. Near-equal excursion means a 2R target is a structure the price path does not honour. This is a claim about risk geometry, not direction: no prediction is made about which way price goes.",
+      "evidence_at_registration": "10 large caps, Sep 2021-Sep 2026. Worse in-band in 10 of 10 symbols and 5 of 6 years; 2023 (the AI melt-up) is the exception. Unconditional gap 0.21, falling to 0.167 once the live gates are applied, so roughly a fifth of the effect is already captured by existing gates.",
+      "known_weaknesses": "The 40-52 boundary was fitted on the same sample it was tested on, which is why this is registered rather than enforced. MFE/MAE over a fixed 10-day window with no stop is not realised P&L, and the sample drifts upward, so only the difference between buckets is load-bearing. All ten names are survivors.",
+      "expected_timeline": "About 27% of gate-passing candidates fall in the band, so at 3 trades/week the in-band group gains roughly 0.8 trades/week and 64 trades takes over a year. Slow by construction; recorded now so the question is answerable later rather than reconstructed after the fact.",
+      "decision_if_supported": "Do not add a veto. Lower target_r_multiple for in-band entries so the target sits inside the excursion the band actually delivers. A veto removes one candidate in four from a system whose binding problem is too few trades, not too many."
     }
   ]
 }

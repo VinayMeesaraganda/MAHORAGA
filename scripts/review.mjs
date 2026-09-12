@@ -51,6 +51,7 @@ const rows = closed.map((e) => {
     catalyst: sig.catalyst?.type ?? "none",
     confidence: sig.research?.confidence ?? null,
     pct52: parse(e.technicals_json)?.pct_of_52w_high ?? null,
+    rsi: sig.gates?.rsi_14 ?? parse(e.technicals_json)?.rsi_14 ?? null,
     cause: e.lessons_learned?.match(/cause=([a-z_]+)/)?.[1] ?? "unrecorded",
   };
 });
@@ -77,6 +78,11 @@ const pick = (spec) => {
     return rows.filter((x) => x.confidence !== null && (val === "0.80+" ? x.confidence >= 0.8 : x.confidence < 0.7));
   if (dim === "pct_of_52w_high")
     return rows.filter((x) => x.pct52 !== null && (val === "75+" ? x.pct52 >= 75 : x.pct52 >= 70 && x.pct52 < 75));
+  // The band is a claim about risk geometry, not direction: inside it, measured
+  // favourable and adverse excursion are near-equal, so a 2R target is asking
+  // the price path for something it does not deliver.
+  if (dim === "rsi_band")
+    return rows.filter((x) => x.rsi !== null && (val === "40-52" ? x.rsi >= 40 && x.rsi <= 52 : x.rsi < 40 || x.rsi > 52));
   return [];
 };
 
