@@ -20,7 +20,11 @@
     "check:fix": "biome check --write src/",
     "test": "vitest",
     "test:run": "vitest run",
-    "setup:access": "npx tsx scripts/setup-access.ts"
+    "setup:access": "npx tsx scripts/setup-access.ts",
+    "doctor": "node scripts/doctor.mjs",
+    "paper:apply": "node scripts/paper-control.mjs apply",
+    "paper:status": "node scripts/paper-control.mjs status",
+    "paper:stop": "node scripts/paper-control.mjs kill"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.35",

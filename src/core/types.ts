@@ -33,6 +33,8 @@ export interface Signal {
   best_flair?: string | null;
   bullish?: number;
   bearish?: number;
+  /** Share of sampled messages that carried an explicit sentiment tag. */
+  tagged_ratio?: number;
   isCrypto?: boolean;
   momentum?: number;
   price?: number;
@@ -41,6 +43,17 @@ export interface Signal {
 // ---------------------------------------------------------------------------
 // Position tracking — entry metadata persisted across alarm cycles
 // ---------------------------------------------------------------------------
+
+export interface PendingExecution {
+  symbol: string;
+  side: "buy" | "sell";
+  reason: string;
+  submitted_at: number;
+  client_order_id?: string;
+  order_id?: string;
+  status: string;
+  expected_qty?: number;
+}
 
 export interface PositionEntry {
   symbol: string;
@@ -52,6 +65,9 @@ export interface PositionEntry {
   entry_reason: string;
   peak_price: number;
   peak_sentiment: number;
+  /** Levels fixed at entry from that name's volatility; config values are the fallback. */
+  stop_pct?: number;
+  target_pct?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +108,32 @@ export interface CostTracker {
 // Research results — output of LLM analysis
 // ---------------------------------------------------------------------------
 
+/**
+ * Tradability metrics derived from the Alpaca snapshot taken at research time.
+ *
+ * Every field is nullable on purpose: a missing bar or a zeroed quote means
+ * "unknown", which the entry gates treat differently from a value that is
+ * present and out of range.
+ */
+export interface MarketContext {
+  price: number;
+  prev_close: number | null;
+  gap_pct: number | null;
+  extension_pct: number | null;
+  range_position: number | null;
+  rel_volume: number | null;
+  dollar_volume: number | null;
+  spread_bps: number | null;
+  /** Daily-bar technicals. Null when insufficient history was returned. */
+  atr_pct: number | null;
+  rsi_14: number | null;
+  sma_20: number | null;
+  sma_50: number | null;
+  trend: "above both" | "above 20" | "below both" | null;
+  /** Last price as a percentage of the 52-week high. */
+  pct_of_52w_high: number | null;
+}
+
 export interface ResearchResult {
   symbol: string;
   verdict: "BUY" | "SKIP" | "WAIT";
@@ -101,6 +143,8 @@ export interface ResearchResult {
   red_flags: string[];
   catalysts: string[];
   timestamp: number;
+  /** Snapshot-derived liquidity/extension context captured with the research call. */
+  market?: MarketContext | null;
 }
 
 export interface TwitterConfirmation {
@@ -141,8 +185,20 @@ export interface AgentState {
   socialHistory: Record<string, SocialHistoryEntry[]>;
   socialSnapshotCache: Record<string, SocialSnapshotCacheEntry>;
   socialSnapshotCacheUpdatedAt: number;
+  /** Symbol -> recent headlines, for the research prompt. */
+  newsCache: Record<string, Array<{ headline: string; source: string; created_at: string }>>;
+  newsCacheUpdatedAt: number;
+  /** Symbol -> classified catalysts, accumulated across passes and pruned by age. */
+  catalystCache: Record<string, Array<Record<string, unknown>>>;
+  /** Macro-topic headlines, for context in the analyst prompt. */
+  macroHeadlines: Array<{ headline: string; source: string; created_at: string }>;
+  /** Measured index/rate/sector regime; shape defined in strategy/default/helpers/macro. */
+  macroRegime: unknown;
   logs: LogEntry[];
   costTracker: CostTracker;
+  llmDailyBudget?: { day: string; calls: number };
+  /** Persisted before broker mutations; unresolved outcomes block duplicate orders. */
+  pendingExecutions?: Record<string, PendingExecution>;
   lastDataGatherRun: number;
   lastAnalystRun: number;
   lastResearchRun: number;
@@ -150,6 +206,8 @@ export interface AgentState {
   signalResearch: Record<string, ResearchResult>;
   positionResearch: Record<string, unknown>;
   stalenessAnalysis: Record<string, unknown>;
+  /** Symbol -> epoch ms of the most recent exit, for the re-entry cooldown. */
+  recentExits: Record<string, number>;
   twitterConfirmations: Record<string, TwitterConfirmation>;
   twitterDailyReads: number;
   twitterDailyReadReset: number;

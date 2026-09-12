@@ -19,7 +19,13 @@ export interface Env {
   CLOUDFLARE_AI_GATEWAY_TOKEN?: string;
   LLM_PROVIDER?: "openai-raw" | "ai-sdk" | "cloudflare-gateway";
   LLM_MODEL?: string;
+  /** JSON object of vendor-specific request body fields for OpenAI-compatible endpoints. */
+  LLM_EXTRA_BODY?: string;
+  MAX_LLM_REQUESTS_PER_DAY?: string;
   TWITTER_BEARER_TOKEN?: string;
+  /** Reddit script-app credentials for application-only OAuth. No user password is used. */
+  REDDIT_CLIENT_ID?: string;
+  REDDIT_CLIENT_SECRET?: string;
   DISCORD_WEBHOOK_URL?: string;
   MAHORAGA_API_TOKEN: string;
   KILL_SWITCH_SECRET: string;

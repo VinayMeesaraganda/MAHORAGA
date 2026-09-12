@@ -7,6 +7,46 @@ import { createOpenAIProvider } from "./openai";
 export type LLMProviderType = "openai-raw" | "ai-sdk" | "cloudflare-gateway";
 
 /**
+ * Resolve the model id sent to an OpenAI-compatible endpoint.
+ *
+ * "openai/gpt-4o" is a provider-qualified name used by the gateway modes, and
+ * the OpenAI API itself wants the bare id. Every other OpenAI-compatible
+ * upstream owns its own namespace: NVIDIA NIM ids are always
+ * "publisher/model" (meta/llama-3.1-70b-instruct) and 404 if the prefix is
+ * stripped. So remove only the openai/ qualifier, and only when no custom base
+ * URL has redirected the request somewhere else.
+ */
+export function resolveOpenAIModel(model: string, customBaseUrl?: string): string {
+  if (customBaseUrl) return model;
+  return model.toLowerCase().startsWith("openai/") ? model.slice("openai/".length) : model;
+}
+
+/**
+ * Parse LLM_EXTRA_BODY, a JSON object of vendor-specific request fields.
+ *
+ * Malformed values are ignored with a warning rather than disabling the
+ * provider: a typo here should not silently stop the agent from trading.
+ */
+export function parseExtraBody(
+  raw: string | undefined,
+  warn: (message: string) => void = console.warn
+): Record<string, unknown> | undefined {
+  if (!raw?.trim()) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    warn("LLM_EXTRA_BODY is not valid JSON; ignoring it");
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    warn("LLM_EXTRA_BODY must be a JSON object; ignoring it");
+    return undefined;
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/**
  * Factory function to create LLM provider based on environment configuration.
  *
  * Provider selection (via LLM_PROVIDER env):
@@ -74,8 +114,9 @@ export function createLLMProvider(env: Env): LLMProvider | null {
       }
       return createOpenAIProvider({
         apiKey: env.OPENAI_API_KEY,
-        model: model.includes("/") ? model.split("/")[1] : model,
+        model: resolveOpenAIModel(model, openaiBaseUrl),
         baseUrl: openaiBaseUrl,
+        extraBody: parseExtraBody(env.LLM_EXTRA_BODY),
       });
   }
 }

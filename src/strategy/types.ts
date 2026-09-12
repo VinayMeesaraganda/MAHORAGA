@@ -16,6 +16,7 @@ import type {
   AgentConfig,
   LLMProvider,
   MarketClock,
+  MarketContext,
   Position,
   PositionEntry,
   ResearchResult,
@@ -54,6 +55,8 @@ export interface StrategyContext {
     getAccount(): Promise<Account>;
     getPositions(): Promise<Position[]>;
     getClock(): Promise<MarketClock>;
+    /** Reconcile persisted order intents against broker orders and holdings. */
+    reconcile?(): Promise<void>;
     /** Execute a buy. Returns true if the order was submitted. */
     buy(symbol: string, notional: number, reason: string): Promise<boolean>;
     /** Close a position. Returns true if the close was submitted. */
@@ -95,7 +98,11 @@ export type ResearchSignalPromptBuilder = (
   sentiment: number,
   sources: string[],
   price: number,
-  ctx: StrategyContext
+  ctx: StrategyContext,
+  /** Snapshot-derived liquidity, extension and technical context; null when unavailable. */
+  market?: MarketContext | null,
+  /** Recent symbol-tagged headlines; empty when the news feed returned none. */
+  headlines?: Array<{ headline: string; source: string; created_at: string }>
 ) => PromptTemplate;
 
 export type ResearchPositionPromptBuilder = (
@@ -152,6 +159,8 @@ export interface Gatherer {
 // ---------------------------------------------------------------------------
 
 export interface Strategy {
+  /** Optional final validation for every autonomous equity entry path. */
+  validateEntry?: (ctx: StrategyContext, symbol: string) => string | null;
   /** Unique strategy name (used in logging and leaderboard display) */
   name: string;
 

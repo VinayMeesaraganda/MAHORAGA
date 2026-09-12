@@ -13,9 +13,13 @@
  * but imports helpers from the extracted modules.
  */
 
+import type { ResearchResult } from "../../core/types";
 import type { Strategy } from "../types";
 import { DEFAULT_CONFIG } from "./config";
 import { cryptoGatherer } from "./gatherers/crypto";
+import { macroGatherer } from "./gatherers/macro";
+import { mostActivesGatherer } from "./gatherers/most-actives";
+import { newsGatherer } from "./gatherers/news";
 import { redditGatherer } from "./gatherers/reddit";
 import { secGatherer } from "./gatherers/sec";
 import { stocktwitsGatherer } from "./gatherers/stocktwits";
@@ -23,6 +27,7 @@ import { analyzeSignalsPrompt } from "./prompts/analyst";
 import { premarketPrompt } from "./prompts/premarket";
 import { researchPositionPrompt, researchSignalPrompt } from "./prompts/research";
 import { selectEntries } from "./rules/entries";
+import { entryRejection } from "./rules/entry-quality";
 import { selectExits } from "./rules/exits";
 
 export const defaultStrategy: Strategy = {
@@ -30,7 +35,15 @@ export const defaultStrategy: Strategy = {
   configSchema: null,
   defaultConfig: DEFAULT_CONFIG,
 
-  gatherers: [stocktwitsGatherer, redditGatherer, cryptoGatherer, secGatherer],
+  gatherers: [
+    stocktwitsGatherer,
+    redditGatherer,
+    newsGatherer,
+    mostActivesGatherer,
+    macroGatherer,
+    cryptoGatherer,
+    secGatherer,
+  ],
 
   prompts: {
     researchSignal: researchSignalPrompt,
@@ -39,6 +52,16 @@ export const defaultStrategy: Strategy = {
     premarketAnalysis: premarketPrompt,
   },
 
+  validateEntry: (ctx, symbol) =>
+    entryRejection(
+      symbol,
+      ctx.signals,
+      ctx.state.get<Record<string, ResearchResult>>("signalResearch")?.[symbol],
+      ctx.config,
+      Date.now(),
+      ctx.state.get<Record<string, number>>("recentExits") ?? {},
+      ctx.state.get<Record<string, never>>("catalystCache") ?? {}
+    ),
   selectEntries,
   selectExits,
 };

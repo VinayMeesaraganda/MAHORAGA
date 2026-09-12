@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorCode } from "../../lib/errors";
-import { createOpenAIProvider, OpenAIProvider } from "./openai";
+import { createOpenAIProvider, OPENAI_REQUEST_TIMEOUT_MS, OpenAIProvider } from "./openai";
 
 describe("OpenAI Provider", () => {
   const mockFetch = vi.fn();
@@ -13,6 +13,7 @@ describe("OpenAI Provider", () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.useRealTimers();
   });
 
   describe("createOpenAIProvider", () => {
@@ -39,6 +40,69 @@ describe("OpenAI Provider", () => {
   });
 
   describe("complete", () => {
+    it("aborts a stalled model request at its deadline without retrying", async () => {
+      vi.useFakeTimers();
+      let transportAborted = false;
+      mockFetch.mockImplementationOnce(
+        (_url: string, options: RequestInit) =>
+          new Promise((_, reject) => {
+            options.signal?.addEventListener("abort", () => {
+              transportAborted = true;
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          })
+      );
+      const result = createOpenAIProvider({ apiKey: "sk-test" }).complete({
+        messages: [{ role: "user", content: "Test" }],
+      });
+      const rejection = expect(result).rejects.toMatchObject({
+        code: ErrorCode.PROVIDER_ERROR,
+        message: expect.stringContaining("timed out"),
+      });
+      await vi.advanceTimersByTimeAsync(OPENAI_REQUEST_TIMEOUT_MS);
+      await rejection;
+      expect(transportAborted).toBe(true);
+      expect(mockFetch).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it.each([true, false])("bounds response body consumption after headers resolve (ok=%s)", async (ok) => {
+      vi.useFakeTimers();
+      mockFetch.mockResolvedValueOnce({
+        ok,
+        status: ok ? 200 : 500,
+        json: () => new Promise(() => {}),
+        text: () => new Promise(() => {}),
+      });
+      const result = createOpenAIProvider({ apiKey: "sk-test" }).complete({
+        messages: [{ role: "user", content: "Test" }],
+      });
+      const rejection = expect(result).rejects.toMatchObject({
+        code: ErrorCode.PROVIDER_ERROR,
+        message: expect.stringContaining("timed out"),
+      });
+      await vi.advanceTimersByTimeAsync(OPENAI_REQUEST_TIMEOUT_MS);
+      await rejection;
+      const options = mockFetch.mock.calls[0]?.[1] as RequestInit;
+      expect(options.signal?.aborted).toBe(true);
+      expect(mockFetch).toHaveBeenCalledOnce();
+    });
+
+    it("clears the deadline when a completion finishes", async () => {
+      vi.useFakeTimers();
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: "Done" } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+      });
+      await createOpenAIProvider({ apiKey: "sk-test" }).complete({ messages: [{ role: "user", content: "Test" }] });
+      expect(vi.getTimerCount()).toBe(0);
+      const options = mockFetch.mock.calls[0]?.[1] as RequestInit;
+      expect(options.signal?.aborted).toBe(false);
+    });
+
     it("sends correct request to OpenAI API", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,

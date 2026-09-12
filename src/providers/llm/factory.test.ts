@@ -92,6 +92,20 @@ describe("LLM Provider Factory", () => {
         expect(body.model).toBe("gpt-4o");
       });
 
+      it("keeps publisher-prefixed model ids when a custom base URL is set", async () => {
+        // NVIDIA NIM ids are always publisher/model and 404 without the prefix.
+        const { resolveOpenAIModel } = await import("./factory");
+        expect(resolveOpenAIModel("meta/llama-3.1-70b-instruct", "https://integrate.api.nvidia.com/v1")).toBe(
+          "meta/llama-3.1-70b-instruct"
+        );
+        expect(resolveOpenAIModel("openai/gpt-4o", "https://integrate.api.nvidia.com/v1")).toBe("openai/gpt-4o");
+        expect(resolveOpenAIModel("openai/gpt-4o")).toBe("gpt-4o");
+        expect(resolveOpenAIModel("OpenAI/gpt-4o")).toBe("gpt-4o");
+        expect(resolveOpenAIModel("gpt-4o-mini")).toBe("gpt-4o-mini");
+        // Without a base URL override an unknown prefix is left alone rather than truncated.
+        expect(resolveOpenAIModel("meta/llama-3.1-70b-instruct")).toBe("meta/llama-3.1-70b-instruct");
+      });
+
       it("strips provider prefix from model name", async () => {
         const fetchMock = vi.fn().mockResolvedValue({
           ok: true,

@@ -8,9 +8,19 @@ import type { Gatherer, StrategyContext } from "../../types";
 import { SOURCE_CONFIG } from "../config";
 import { calculateTimeDecay, detectSentiment, getEngagementMultiplier, getFlairMultiplier } from "../helpers/sentiment";
 import { extractTickers, tickerCache } from "../helpers/ticker";
+import { getRedditToken, redditRequest } from "./reddit-auth";
 
 async function gatherReddit(ctx: StrategyContext): Promise<Signal[]> {
   const subreddits = ["wallstreetbets", "stocks", "investing", "options"];
+  // Authenticated requests go to oauth.reddit.com, which is not blocked from
+  // datacenter IPs and carries the higher per-client rate limit. Without
+  // credentials this falls back to the public host and its 403s.
+  const token = await getRedditToken(ctx);
+  const { base, headers } = redditRequest(token);
+  if (!token)
+    ctx.log("Reddit", "unauthenticated", {
+      note: "Set REDDIT_CLIENT_ID/SECRET; public endpoint is rate limited and often 403s",
+    });
   const tickerData = new Map<
     string,
     {
@@ -31,10 +41,15 @@ async function gatherReddit(ctx: StrategyContext): Promise<Signal[]> {
     const sourceWeight = SOURCE_CONFIG.weights[`reddit_${sub}` as keyof typeof SOURCE_CONFIG.weights] || 0.7;
 
     try {
-      const res = await fetch(`https://www.reddit.com/r/${sub}/hot.json?limit=25`, {
-        headers: { "User-Agent": "Mahoraga/2.0" },
+      const res = await fetch(`${base}/r/${sub}/hot.json?limit=25`, {
+        headers,
+        signal: AbortSignal.timeout(10_000),
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        ctx.log("Reddit", "source_unavailable", { status: res.status, subreddit: sub });
+        if (res.status === 403 || res.status === 429) break;
+        continue;
+      }
       const data = (await res.json()) as {
         data?: {
           children?: Array<{

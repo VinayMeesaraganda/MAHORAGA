@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorCode } from "../../lib/errors";
-import { AlpacaClient, createAlpacaClient } from "./client";
+import { ALPACA_REQUEST_TIMEOUT_MS, AlpacaClient, createAlpacaClient } from "./client";
 
 describe("Alpaca Client", () => {
   const mockFetch = vi.fn();
@@ -19,6 +19,7 @@ describe("Alpaca Client", () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
+    vi.useRealTimers();
   });
 
   describe("createAlpacaClient", () => {
@@ -34,6 +35,63 @@ describe("Alpaca Client", () => {
   });
 
   describe("tradingRequest", () => {
+    it.each(["POST", "DELETE"])("aborts a stalled %s without retrying an ambiguous broker mutation", async (method) => {
+      vi.useFakeTimers();
+      let transportAborted = false;
+      mockFetch.mockImplementationOnce(
+        (_url: string, options: RequestInit) =>
+          new Promise((_, reject) => {
+            options.signal?.addEventListener("abort", () => {
+              transportAborted = true;
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          })
+      );
+
+      const result = createAlpacaClient(validConfig).tradingRequest(method, "/v2/orders", { symbol: "AAPL" });
+      const rejection = expect(result).rejects.toMatchObject({
+        code: ErrorCode.PROVIDER_ERROR,
+        message: expect.stringContaining("Broker outcome is unknown"),
+        details: { timed_out: true, outcome_unknown: true },
+      });
+      await vi.advanceTimersByTimeAsync(ALPACA_REQUEST_TIMEOUT_MS);
+      await rejection;
+      expect(transportAborted).toBe(true);
+      expect(mockFetch).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it.each([true, false])("bounds the response body read after headers resolve (ok=%s)", async (ok) => {
+      vi.useFakeTimers();
+      mockFetch.mockResolvedValueOnce({
+        ok,
+        status: ok ? 200 : 500,
+        json: () => new Promise(() => {}),
+        text: () => new Promise(() => {}),
+      });
+      const result = createAlpacaClient(validConfig).tradingRequest("GET", "/v2/account");
+      const rejection = expect(result).rejects.toMatchObject({
+        code: ErrorCode.PROVIDER_ERROR,
+        details: { timed_out: true, outcome_unknown: false },
+      });
+      await vi.advanceTimersByTimeAsync(ALPACA_REQUEST_TIMEOUT_MS);
+      await rejection;
+      const options = mockFetch.mock.calls[0]?.[1] as RequestInit;
+      expect(options.signal?.aborted).toBe(true);
+      expect(mockFetch).toHaveBeenCalledOnce();
+    });
+
+    it("clears its deadline once the complete response arrives", async () => {
+      vi.useFakeTimers();
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ equity: "100000" }) });
+      await expect(createAlpacaClient(validConfig).tradingRequest("GET", "/v2/account")).resolves.toEqual({
+        equity: "100000",
+      });
+      expect(vi.getTimerCount()).toBe(0);
+      const options = mockFetch.mock.calls[0]?.[1] as RequestInit;
+      expect(options.signal?.aborted).toBe(false);
+    });
+
     it("uses paper trading URL when paper is true", async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,

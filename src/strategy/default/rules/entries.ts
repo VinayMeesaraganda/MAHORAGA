@@ -7,6 +7,7 @@
 
 import type { Account, Position, ResearchResult } from "../../../core/types";
 import type { BuyCandidate, StrategyContext } from "../../types";
+import { entryRejection, volatilitySizedTrade } from "./entry-quality";
 
 /**
  * Select entry candidates from LLM-researched signals.
@@ -22,19 +23,28 @@ export function selectEntries(
 ): BuyCandidate[] {
   const heldSymbols = new Set(positions.map((p) => p.symbol));
   const candidates: BuyCandidate[] = [];
+  const recentExits = ctx.state.get<Record<string, number>>("recentExits") ?? {};
+  const catalysts = ctx.state.get<Record<string, never>>("catalystCache") ?? {};
+  const now = Date.now();
 
   if (positions.length >= ctx.config.max_positions) return [];
 
   const buyResearch = research
     .filter((r) => r.verdict === "BUY" && r.confidence >= ctx.config.min_analyst_confidence)
-    .filter((r) => !heldSymbols.has(r.symbol))
+    .filter(
+      (r) =>
+        !heldSymbols.has(r.symbol) && !entryRejection(r.symbol, ctx.signals, r, ctx.config, now, recentExits, catalysts)
+    )
     .sort((a, b) => b.confidence - a.confidence);
 
   for (const r of buyResearch.slice(0, 3)) {
     if (positions.length + candidates.length >= ctx.config.max_positions) break;
 
     const sizePct = Math.min(20, ctx.config.position_size_pct_of_cash);
-    const notional = Math.min(account.cash * (sizePct / 100) * r.confidence, ctx.config.max_position_value);
+    const notional = Math.min(
+      account.cash * (sizePct / 100) * r.confidence,
+      volatilitySizedTrade(account.equity, ctx.config, r.market?.atr_pct).notional
+    );
 
     if (notional < 100) continue;
 

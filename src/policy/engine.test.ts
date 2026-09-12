@@ -499,3 +499,30 @@ describe("PolicyEngine", () => {
     });
   });
 });
+
+describe("broker equity daily loss protection", () => {
+  const engine = new PolicyEngine(createTestConfig());
+  function evaluate(equity: number, lastEquity = 100000) {
+    return engine.evaluate({
+      order: createTestOrder(),
+      account: createTestAccount({ equity, last_equity: lastEquity }),
+      positions: [],
+      clock: createTestClock(),
+      riskState: createTestRiskState(),
+    });
+  }
+  it("blocks at the 2% boundary even when the legacy loss counter is zero", () => {
+    expect(evaluate(98000).violations.some((v) => v.rule === "daily_loss_limit")).toBe(true);
+  });
+  it("does not block a smaller loss or a profitable day", () => {
+    for (const equity of [98001, 100000, 101000]) {
+      expect(evaluate(equity).violations.some((v) => v.rule === "daily_loss_limit")).toBe(false);
+    }
+  });
+  it("fails closed for invalid equity baselines", () => {
+    for (const previous of [0, NaN, Infinity, -1]) {
+      expect(evaluate(100000, previous).violations.some((v) => v.rule === "daily_loss_limit")).toBe(true);
+    }
+    expect(evaluate(NaN).violations.some((v) => v.rule === "daily_loss_limit")).toBe(true);
+  });
+});

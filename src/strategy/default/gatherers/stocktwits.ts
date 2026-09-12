@@ -16,11 +16,11 @@ async function fetchWithRetry(
 ): Promise<Response | null> {
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const res = await fetch(url, { headers });
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
       if (res.ok) return res;
-      if (res.status === 403) {
-        await sleep(1000 * 2 ** i);
-        continue;
+      if (res.status === 403 || res.status === 429) {
+        log("StockTwits", "source_unavailable", { status: res.status });
+        return null;
       }
       return null;
     } catch (error) {
@@ -29,6 +29,69 @@ async function fetchWithRetry(
     }
   }
   return null;
+}
+
+/** A net score over one or two tagged messages is noise, not sentiment. */
+export const MIN_TAGGED_MESSAGES = 3;
+
+export interface StockTwitsMessage {
+  entities?: { sentiment?: { basic?: string } };
+  created_at?: string;
+}
+
+export interface StockTwitsScore {
+  /** Net bullish share of the messages that expressed a view, in [-1, 1]. */
+  score: number;
+  bullish: number;
+  bearish: number;
+  taggedCount: number;
+  taggedRatio: number;
+  avgFreshness: number;
+  total: number;
+  usable: boolean;
+}
+
+/**
+ * Score a symbol's message stream.
+ *
+ * Most StockTwits messages carry no sentiment tag. Scoring the net of the
+ * tagged ones over every message deflates the result by the untagged share, so
+ * a unanimously bullish stream never reaches the configured threshold. Score
+ * over the messages that actually expressed a view and keep the tagged share
+ * separately as a confidence measure.
+ */
+export function scoreStockTwitsStream(messages: StockTwitsMessage[]): StockTwitsScore {
+  let bullish = 0;
+  let bearish = 0;
+  let taggedTimeDecay = 0;
+  let taggedCount = 0;
+  let totalTimeDecay = 0;
+
+  for (const msg of messages) {
+    const sentiment = msg.entities?.sentiment?.basic;
+    const msgTime = new Date(msg.created_at || Date.now()).getTime() / 1000;
+    const timeDecay = calculateTimeDecay(msgTime);
+    totalTimeDecay += timeDecay;
+
+    if (sentiment === "Bullish" || sentiment === "Bearish") {
+      taggedTimeDecay += timeDecay;
+      taggedCount++;
+      if (sentiment === "Bullish") bullish += timeDecay;
+      else bearish += timeDecay;
+    }
+  }
+
+  const total = messages.length;
+  return {
+    score: taggedTimeDecay > 0 ? (bullish - bearish) / taggedTimeDecay : 0,
+    bullish,
+    bearish,
+    taggedCount,
+    taggedRatio: total > 0 ? taggedCount / total : 0,
+    avgFreshness: total > 0 ? totalTimeDecay / total : 0,
+    total,
+    usable: total >= 5 && taggedCount >= MIN_TAGGED_MESSAGES,
+  };
 }
 
 async function gatherStockTwits(ctx: StrategyContext): Promise<Signal[]> {
@@ -72,25 +135,10 @@ async function gatherStockTwits(ctx: StrategyContext): Promise<Signal[]> {
         };
         const messages = streamData.messages || [];
 
-        let bullish = 0;
-        let bearish = 0;
-        let totalTimeDecay = 0;
-        for (const msg of messages) {
-          const sentiment = msg.entities?.sentiment?.basic;
-          const msgTime = new Date(msg.created_at || Date.now()).getTime() / 1000;
-          const timeDecay = calculateTimeDecay(msgTime);
-          totalTimeDecay += timeDecay;
+        const { score, bullish, bearish, taggedCount, taggedRatio, avgFreshness, total, usable } =
+          scoreStockTwitsStream(messages);
 
-          if (sentiment === "Bullish") bullish += timeDecay;
-          else if (sentiment === "Bearish") bearish += timeDecay;
-        }
-
-        const total = messages.length;
-        const effectiveTotal = totalTimeDecay || 1;
-        const score = effectiveTotal > 0 ? (bullish - bearish) / effectiveTotal : 0;
-        const avgFreshness = total > 0 ? totalTimeDecay / total : 0;
-
-        if (total >= 5) {
+        if (usable) {
           const weightedSentiment = score * sourceWeight * avgFreshness;
 
           signals.push({
@@ -102,9 +150,10 @@ async function gatherStockTwits(ctx: StrategyContext): Promise<Signal[]> {
             volume: total,
             bullish: Math.round(bullish),
             bearish: Math.round(bearish),
+            tagged_ratio: taggedRatio,
             freshness: avgFreshness,
             source_weight: sourceWeight,
-            reason: `StockTwits: ${Math.round(bullish)}B/${Math.round(bearish)}b (${(score * 100).toFixed(0)}%) [fresh:${(avgFreshness * 100).toFixed(0)}%]`,
+            reason: `StockTwits: ${Math.round(bullish)}B/${Math.round(bearish)}b of ${taggedCount}/${total} tagged (${(score * 100).toFixed(0)}%) [fresh:${(avgFreshness * 100).toFixed(0)}%]`,
             timestamp: Date.now(),
           });
         }

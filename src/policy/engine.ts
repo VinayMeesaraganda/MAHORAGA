@@ -103,7 +103,20 @@ export class PolicyEngine {
   }
 
   private checkDailyLossLimit(ctx: PolicyContext, violations: PolicyViolation[]): void {
-    const dailyLossPct = ctx.riskState.daily_loss_usd / ctx.account.equity;
+    const { equity, last_equity: previousClose } = ctx.account;
+    if (!Number.isFinite(equity) || equity <= 0 || !Number.isFinite(previousClose) || previousClose <= 0) {
+      violations.push({
+        rule: "daily_loss_limit",
+        message: "Valid current and previous-close equity are required.",
+        current_value: equity,
+        limit_value: previousClose,
+      });
+      return;
+    }
+    // Broker equity includes unrealized P&L; do not depend solely on the legacy fill counter.
+    // Cash flows are not adjusted: withdrawals can block entries, deposits can mask losses.
+    const equityLossPct = Math.max(0, (previousClose - equity) / previousClose);
+    const dailyLossPct = Math.max(equityLossPct, ctx.riskState.daily_loss_usd / equity);
 
     if (dailyLossPct >= this.config.max_daily_loss_pct) {
       violations.push({

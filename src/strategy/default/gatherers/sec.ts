@@ -81,6 +81,7 @@ async function resolveTickerFromCompanyName(companyName: string): Promise<string
   try {
     const response = await fetch("https://www.sec.gov/files/company_tickers.json", {
       headers: { "User-Agent": "Mahoraga Trading Bot" },
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!response.ok) return null;
@@ -123,6 +124,7 @@ async function gatherSECFilings(ctx: StrategyContext): Promise<Signal[]> {
           "User-Agent": "Mahoraga Trading Bot (contact@example.com)",
           Accept: "application/atom+xml",
         },
+        signal: AbortSignal.timeout(10_000),
       }
     );
 

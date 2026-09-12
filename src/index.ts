@@ -17,8 +17,8 @@ function constantTimeCompare(a: string, b: string): boolean {
   return mismatch === 0;
 }
 
-function isAuthorized(request: Request, env: Env): boolean {
-  const token = env.MAHORAGA_API_TOKEN;
+function isAuthorized(request: Request, env: Env, emergency = false): boolean {
+  const token = emergency ? env.KILL_SWITCH_SECRET : env.MAHORAGA_API_TOKEN;
   if (!token) return false;
   const authHeader = request.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) return false;
@@ -75,20 +75,24 @@ export default {
     }
 
     if (url.pathname.startsWith("/agent")) {
-      if (!isAuthorized(request, env)) {
+      const emergency = url.pathname === "/agent/kill";
+      if (!isAuthorized(request, env, emergency)) {
         return unauthorizedResponse();
       }
 
       // Rate limiting via SessionDO
-      const tokenHash = request.headers.get("Authorization")?.slice(7, 15) || "anon";
-      const rateCheck = await checkRateLimit(env, `agent-${tokenHash}`);
-      if (!rateCheck.allowed) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }), {
-          status: 429,
-          headers: { "Content-Type": "application/json" },
-        });
+      // Emergency shutdown must remain available when the normal API limit is exhausted.
+      if (!emergency) {
+        const tokenHash = request.headers.get("Authorization")?.slice(7, 15) || "anon";
+        const rateCheck = await checkRateLimit(env, `agent-${tokenHash}`);
+        if (!rateCheck.allowed) {
+          return new Response(JSON.stringify({ error: "Rate limit exceeded", resetAt: rateCheck.resetAt }), {
+            status: 429,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        await incrementRequest(env, `agent-${tokenHash}`);
       }
-      await incrementRequest(env, `agent-${tokenHash}`);
 
       const stub = getHarnessStub(env);
       const agentPath = url.pathname.replace("/agent", "") || "/status";

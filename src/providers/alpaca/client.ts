@@ -1,4 +1,7 @@
 import { createError, ErrorCode } from "../../lib/errors";
+import { withRequestDeadline } from "../../lib/request-deadline";
+
+export const ALPACA_REQUEST_TIMEOUT_MS = 10_000;
 
 export interface AlpacaClientConfig {
   apiKey: string;
@@ -46,9 +49,26 @@ export class AlpacaClient {
   }
 
   private async request<T>(method: string, url: string, body?: unknown): Promise<T> {
+    const mutation = !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
+    const timeoutError = createError(
+      ErrorCode.PROVIDER_ERROR,
+      `Alpaca request timed out after ${ALPACA_REQUEST_TIMEOUT_MS}ms.${
+        mutation ? " Broker outcome is unknown; reconcile orders and positions before submitting again." : ""
+      }`,
+      { timed_out: true, outcome_unknown: mutation }
+    );
+    // No automatic retries: a timed-out submission/cancel may have reached the
+    // broker even though its response never reached us.
+    return withRequestDeadline(ALPACA_REQUEST_TIMEOUT_MS, timeoutError, (signal) =>
+      this.requestWithinDeadline<T>(method, url, signal, body)
+    );
+  }
+
+  private async requestWithinDeadline<T>(method: string, url: string, signal: AbortSignal, body?: unknown): Promise<T> {
     const options: RequestInit = {
       method,
       headers: this.headers,
+      signal,
     };
 
     if (body) {

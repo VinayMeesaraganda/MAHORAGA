@@ -1,7 +1,7 @@
 /**
  * MahoragaHarness — Thin Orchestrator
  *
- * This Durable Object is the core scheduler: it runs alarm() every 30s,
+ * This Durable Object is the core scheduler: it targets a 30s heartbeat,
  * delegates data gathering, research, and trading decisions to the active
  * strategy (src/strategy/index.ts), and enforces policy/safety via PolicyBroker.
  *
@@ -11,9 +11,20 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { createPolicyBroker } from "../core/policy-broker";
+import { freshEntryMarket } from "../core/execution-market";
+import { reserveRequest } from "../core/request-budget";
+import { gatherWithinDeadline } from "../core/gather-boundary";
+import {
+  closedMarketDelayMs,
+  HEARTBEAT_INTERVAL_MS,
+  heartbeatDelayMs,
+  leastRecentlyResearched,
+  nextDueStage,
+} from "../core/scheduling";
 import type {
   AgentState,
   LogEntry,
+  MarketContext,
   ResearchResult,
   Signal,
   SocialHistoryEntry,
@@ -23,9 +34,24 @@ import type { Env } from "../env.d";
 import { getDefaultPolicyConfig } from "../policy/config";
 import { createAlpacaProviders } from "../providers/alpaca";
 import { createLLMProvider } from "../providers/llm/factory";
-import type { Account, LLMProvider, MarketClock, Position } from "../providers/types";
+import type {
+  Account,
+  Bar,
+  CompletionParams,
+  CompletionResult,
+  LLMProvider,
+  MarketClock,
+  Position,
+} from "../providers/types";
 import type { AgentConfig } from "../schemas/agent-config";
 import { safeValidateAgentConfig } from "../schemas/agent-config";
+import {
+  AnalystResponseSchema,
+  PositionResearchResponseSchema,
+  parseAnalystRecommendations,
+  parseJsonObject,
+  SignalResearchResponseSchema,
+} from "../schemas/llm-responses";
 import { createD1Client } from "../storage/d1/client";
 import { activeStrategy } from "../strategy";
 import { DEFAULT_STATE } from "../strategy/default/config";
@@ -35,8 +61,10 @@ import {
   isTwitterEnabled,
 } from "../strategy/default/gatherers/twitter";
 import { isCryptoSymbol, normalizeCryptoSymbol } from "../strategy/default/helpers/crypto";
+import { deriveMarketContext, withTechnicals } from "../strategy/default/helpers/market";
 import { tickerCache } from "../strategy/default/helpers/ticker";
 import { runCryptoTrading } from "../strategy/default/rules/crypto-trading";
+import { entryRejection, volatilitySizedTrade } from "../strategy/default/rules/entry-quality";
 import { findBestOptionsContract } from "../strategy/default/rules/options";
 import type { StrategyContext } from "../strategy/types";
 
@@ -50,6 +78,7 @@ export class MahoragaHarness extends DurableObject<Env> {
   private _etDayFormatter: Intl.DateTimeFormat | null = null;
   private discordCooldowns: Map<string, number> = new Map();
   private readonly DISCORD_COOLDOWN_MS = 30 * 60 * 1000;
+  private optionalStageLastRun = { premarket: 0, crypto: 0, twitter: 0 };
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -97,6 +126,14 @@ export class MahoragaHarness extends DurableObject<Env> {
     }
   }
 
+  private async completeWithBudget(params: CompletionParams): Promise<CompletionResult> {
+    if (!this._llm) throw new Error("LLM provider is not configured");
+    const limit = Number(this.env.MAX_LLM_REQUESTS_PER_DAY ?? "300");
+    this.state.llmDailyBudget = reserveRequest(this.state.llmDailyBudget, this.getEtDayString(Date.now()), limit);
+    await this.persist();
+    return this._llm.complete(params);
+  }
+
   private getEtDayString(epochMs: number): string {
     if (!this._etDayFormatter) {
       try {
@@ -140,6 +177,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     const db = createD1Client(this.env.DB);
     const alpaca = createAlpacaProviders(this.env);
     const policyConfig = getDefaultPolicyConfig(this.env);
+    policyConfig.max_open_positions = Math.min(policyConfig.max_open_positions, this.state.config.max_positions);
 
     const broker = createPolicyBroker({
       alpaca,
@@ -148,17 +186,66 @@ export class MahoragaHarness extends DurableObject<Env> {
       log: (agent, action, details) => self.log(agent, action, details),
       cryptoSymbols: self.state.config.crypto_symbols || [],
       allowedExchanges: self.state.config.allowed_exchanges ?? ["NYSE", "NASDAQ", "ARCA", "AMEX", "BATS"],
+      canSubmit: () => self.state.enabled,
+      pendingExecutions: (self.state.pendingExecutions ??= {}),
+      persist: () => self.persist(),
+      validateBuy: (symbol) => activeStrategy.validateEntry?.(context, symbol) ?? null,
+      validateExecution: async (symbol) => {
+        const snapshot = await alpaca.marketData.getSnapshot(symbol, { feed: "iex" });
+        if (snapshot.symbol !== symbol) return "Execution snapshot symbol mismatch";
+        const check = freshEntryMarket(snapshot, self.state.signalResearch[symbol]?.market, self.state.config);
+        if (check.rejection) return check.rejection;
+        // Refresh session status after the quote read; a cached open clock must
+        // not permit an order to queue overnight after the closing bell.
+        const clock = await alpaca.trading.getClock();
+        const now = Date.now();
+        const quoteTime = Date.parse(snapshot.latest_quote.timestamp);
+        if (
+          !clock.is_open ||
+          !Number.isFinite(Date.parse(clock.next_close)) ||
+          Date.parse(clock.next_close) - now < 30_000 ||
+          now - quoteTime > 30_000
+        ) {
+          return "Market closed, near close, or execution quote expired";
+        }
+        return null;
+      },
+      maxBuyNotional: (account, symbol) => self.sizedTradeFor(symbol, account.equity).notional,
+      onBuyIntent: (symbol, _notional, reason, account) => {
+        const signal = self.state.signalCache.find((s) => s.symbol === symbol);
+        const social = self.state.socialSnapshotCache[symbol];
+        const sentiment = social?.sentiment ?? signal?.sentiment ?? 0;
+        self.state.positionEntries[symbol] = {
+          symbol,
+          entry_time: Date.now(),
+          entry_price: 0,
+          entry_sentiment: sentiment,
+          entry_social_volume: social?.volume ?? signal?.volume ?? 0,
+          entry_sources: social?.sources ?? [signal?.source ?? "research"],
+          entry_reason: reason,
+          peak_price: 0,
+          peak_sentiment: sentiment,
+          ...self.sizedTradeFor(symbol, account.equity),
+        };
+      },
+      onBuyAbandoned: (symbol) => {
+        delete self.state.positionEntries[symbol];
+      },
       onSell: (symbol) => {
         delete self.state.positionEntries[symbol];
         delete self.state.socialHistory[symbol];
         delete self.state.stalenessAnalysis[symbol];
+        // The research that justified the entry is still inside its freshness
+        // window when a stop fills, so record the exit and let the entry gate
+        // enforce a cooldown instead of re-buying the same name minutes later.
+        self.recordExit(symbol);
       },
     });
 
-    return {
+    const context: StrategyContext = {
       env: this.env,
       config: this.state.config,
-      llm: this._llm,
+      llm: this._llm ? { complete: (params) => this.completeWithBudget(params) } : null,
       log: (agent, action, details) => self.log(agent, action, details),
       trackLLMCost: (model, tokensIn, tokensOut) => self.trackLLMCost(model, tokensIn, tokensOut),
       sleep: (ms) => self.sleep(ms),
@@ -171,9 +258,12 @@ export class MahoragaHarness extends DurableObject<Env> {
           (self.state as unknown as Record<string, unknown>)[key] = value;
         },
       },
-      signals: this.state.signalCache,
+      get signals() {
+        return self.state.signalCache;
+      },
       positionEntries: this.state.positionEntries,
     };
+    return context;
   }
 
   // ============================================================================
@@ -187,7 +277,8 @@ export class MahoragaHarness extends DurableObject<Env> {
     }
 
     const now = Date.now();
-    const RESEARCH_INTERVAL_MS = 120_000;
+    // Distribute the former five-name batch across separate alarms.
+    const RESEARCH_INTERVAL_MS = Math.max(30_000, Math.max(120_000, this.state.config.analyst_interval_ms) / 5);
     const POSITION_RESEARCH_INTERVAL_MS = 300_000;
     const premarketPlanWindowMinutes = Math.max(1, this.state.config.premarket_plan_window_minutes ?? 5);
     const marketOpenExecuteWindowMinutes = Math.max(0, this.state.config.market_open_execute_window_minutes ?? 2);
@@ -195,6 +286,9 @@ export class MahoragaHarness extends DurableObject<Env> {
     const ctx = this.buildStrategyContext();
 
     try {
+      // Settle broker intents even when expensive equity work is asleep.
+      await ctx.broker.reconcile?.();
+      if (!this.state.enabled) return;
       const clock = await ctx.broker.getClock();
       const clockNowMs = Number.isFinite(new Date(clock.timestamp).getTime())
         ? new Date(clock.timestamp).getTime()
@@ -207,18 +301,37 @@ export class MahoragaHarness extends DurableObject<Env> {
         this.state.lastKnownNextOpenMs = nextOpenMs;
       }
 
-      // Data gathering
-      if (now - this.state.lastDataGatherRun >= this.state.config.data_poll_interval_ms) {
-        await this.runDataGatherers(ctx);
+      const idleDelay = closedMarketDelayMs(
+        clock,
+        this.state.config.crypto_enabled,
+        premarketPlanWindowMinutes,
+        clockNowMs
+      );
+      if (idleDelay !== null) {
+        this.state.lastClockIsOpen = false;
+        await this.persist();
+        await this.scheduleNextAlarm(idleDelay);
+        return;
       }
 
-      // Signal research
-      if (now - this.state.lastResearchRun >= RESEARCH_INTERVAL_MS) {
-        await this.researchTopSignals(ctx, 5);
-        this.state.lastResearchRun = now;
+      // Always use fresh broker state before optional work. Account and holdings
+      // share one bounded read window instead of two serial requests.
+      const [positions, account] = await Promise.all([ctx.broker.getPositions(), ctx.broker.getAccount()]);
+      if (!this.state.enabled) return;
+      if (clock.is_open) {
+        const exits = activeStrategy.selectExits(
+          ctx,
+          positions.filter(
+            (p) => p.asset_class === "us_equity" || (p.asset_class === "us_option" && this.state.config.options_enabled)
+          ),
+          account
+        );
+        for (const exit of exits) {
+          if (!this.state.enabled) break;
+          await ctx.broker.sell(exit.symbol, exit.reason);
+        }
       }
 
-      // Clear stale premarket plan from a previous day
       if (
         this.state.premarketPlan &&
         this.state.lastPremarketPlanDayEt &&
@@ -232,86 +345,132 @@ export class MahoragaHarness extends DurableObject<Env> {
         this.state.lastPremarketPlanDayEt = null;
       }
 
-      // Pre-market planning window
-      if (!clock.is_open && !this.state.premarketPlan) {
-        const minutesToOpen = nextOpenValid ? (nextOpenMs - clockNowMs) / 60000 : Number.POSITIVE_INFINITY;
-        const shouldPlan =
-          minutesToOpen > 0 &&
-          minutesToOpen <= premarketPlanWindowMinutes &&
-          this.state.lastPremarketPlanDayEt !== etDay;
+      const minutesToOpen = nextOpenValid ? (nextOpenMs - clockNowMs) / 60_000 : Number.POSITIVE_INFINITY;
+      const shouldPlan =
+        !clock.is_open &&
+        !this.state.premarketPlan &&
+        minutesToOpen > 0 &&
+        minutesToOpen <= premarketPlanWindowMinutes &&
+        this.state.lastPremarketPlanDayEt !== etDay;
+      const lastKnownOpenMs = this.state.lastKnownNextOpenMs;
+      const hasOpenMs = typeof lastKnownOpenMs === "number" && Number.isFinite(lastKnownOpenMs);
+      const withinOpenWindow =
+        hasOpenMs &&
+        clockNowMs >= lastKnownOpenMs &&
+        clockNowMs - lastKnownOpenMs <= marketOpenExecuteWindowMinutes * 60_000;
+      const marketJustOpened = this.state.lastClockIsOpen === false && clock.is_open;
+      const shouldExecutePlan =
+        clock.is_open &&
+        !!this.state.premarketPlan &&
+        (withinOpenWindow || marketJustOpened || (!hasOpenMs && this.state.lastClockIsOpen == null));
 
-        if (shouldPlan) {
-          await this.runPreMarketAnalysis(ctx);
-          if (this.state.premarketPlan) this.state.lastPremarketPlanDayEt = etDay;
-        }
-      }
+      // Exactly one optional stage per alarm. An order-capable stage is always
+      // awaited: racing it would allow financial mutations after timeout.
+      const stage = shouldExecutePlan
+        ? "execute-plan"
+        : nextDueStage(
+            [
+              {
+                name: "gather",
+                lastRun: this.state.lastDataGatherRun,
+                intervalMs: this.state.config.data_poll_interval_ms,
+                eligible: true,
+              },
+              {
+                name: "research",
+                lastRun: this.state.lastResearchRun,
+                intervalMs: RESEARCH_INTERVAL_MS,
+                eligible: this.state.signalCache.length > 0 && !!this._llm,
+              },
+              {
+                name: "analyst",
+                lastRun: this.state.lastAnalystRun,
+                intervalMs: this.state.config.analyst_interval_ms,
+                eligible: clock.is_open,
+              },
+              {
+                name: "premarket",
+                lastRun: this.optionalStageLastRun.premarket,
+                intervalMs: 60_000,
+                eligible: shouldPlan && this.state.signalCache.length > 0 && !!this._llm,
+              },
+              {
+                name: "position-research",
+                lastRun: this.state.lastPositionResearchRun,
+                intervalMs: POSITION_RESEARCH_INTERVAL_MS / Math.max(1, positions.length),
+                eligible: clock.is_open && this.state.config.position_research_enabled && positions.length > 0,
+              },
+              {
+                name: "crypto",
+                lastRun: this.optionalStageLastRun.crypto,
+                intervalMs: HEARTBEAT_INTERVAL_MS,
+                eligible: this.state.config.crypto_enabled,
+              },
+              {
+                name: "twitter",
+                lastRun: this.optionalStageLastRun.twitter,
+                intervalMs: 120_000,
+                eligible: clock.is_open && isTwitterEnabled(ctx),
+              },
+            ],
+            now
+          );
 
-      // Positions snapshot
-      const positions = await ctx.broker.getPositions();
-
-      // Crypto trading (24/7)
-      if (this.state.config.crypto_enabled) {
-        await runCryptoTrading(ctx, positions);
-      }
-
-      // Market-hours logic
-      if (clock.is_open) {
-        const lastKnownOpenMs = this.state.lastKnownNextOpenMs;
-        const hasOpenMs = typeof lastKnownOpenMs === "number" && Number.isFinite(lastKnownOpenMs);
-        const openWindowMs = marketOpenExecuteWindowMinutes * 60_000;
-        const withinOpenWindow =
-          hasOpenMs && clockNowMs >= lastKnownOpenMs && clockNowMs - lastKnownOpenMs <= openWindowMs;
-        const clockStateUnknown = this.state.lastClockIsOpen == null;
-        const marketJustOpened = this.state.lastClockIsOpen === false && clock.is_open;
-
-        const shouldExecutePremarketPlan =
-          !!this.state.premarketPlan &&
-          ((hasOpenMs && withinOpenWindow) || marketJustOpened || (!hasOpenMs && clockStateUnknown));
-        if (shouldExecutePremarketPlan) {
-          await this.executePremarketPlan(ctx);
-        }
-
-        // Analyst cycle
-        if (now - this.state.lastAnalystRun >= this.state.config.analyst_interval_ms) {
-          await this.runAnalyst(ctx);
-          this.state.lastAnalystRun = now;
-        }
-
-        // Position research
-        if (positions.length > 0 && now - this.state.lastPositionResearchRun >= POSITION_RESEARCH_INTERVAL_MS) {
-          for (const pos of positions) {
-            if (pos.asset_class !== "us_option") {
-              await this.callPositionResearch(ctx, pos);
-            }
+      // If broker protection already consumed a heartbeat, return promptly to
+      // protection instead of appending more work to an overdue cycle.
+      if (this.state.enabled && Date.now() - now < HEARTBEAT_INTERVAL_MS && stage) {
+        this.log("System", "scheduled_stage", { stage });
+        switch (stage) {
+          case "gather":
+            this.state.lastDataGatherRun = now;
+            await this.runDataGatherers(ctx);
+            break;
+          case "research":
+            this.state.lastResearchRun = now;
+            await this.researchTopSignals(ctx, 5);
+            break;
+          case "analyst":
+            this.state.lastAnalystRun = now;
+            await this.runAnalyst(ctx);
+            break;
+          case "premarket":
+            this.optionalStageLastRun.premarket = now;
+            await this.runPreMarketAnalysis(ctx);
+            if (this.state.premarketPlan) this.state.lastPremarketPlanDayEt = etDay;
+            break;
+          case "execute-plan":
+            await this.executePremarketPlan(ctx);
+            break;
+          case "position-research": {
+            this.state.lastPositionResearchRun = now;
+            const leastRecent = positions
+              .filter((p) => p.asset_class !== "us_option")
+              .sort(
+                (a, b) =>
+                  ((this.state.positionResearch[a.symbol] as { timestamp?: number } | undefined)?.timestamp ?? 0) -
+                  ((this.state.positionResearch[b.symbol] as { timestamp?: number } | undefined)?.timestamp ?? 0)
+              )[0];
+            if (leastRecent) await this.callPositionResearch(ctx, leastRecent);
+            break;
           }
-          this.state.lastPositionResearchRun = now;
-        }
-
-        // Options exits (checked every tick, not just analyst cycle)
-        if (this.state.config.options_enabled) {
-          for (const pos of positions) {
-            if (pos.asset_class !== "us_option") continue;
-            const ep = pos.avg_entry_price || pos.current_price;
-            const plPct = ep > 0 ? ((pos.current_price - ep) / ep) * 100 : 0;
-            if (plPct >= this.state.config.options_take_profit_pct) {
-              await ctx.broker.sell(pos.symbol, `Options take profit at +${plPct.toFixed(1)}%`);
-            } else if (plPct <= -this.state.config.options_stop_loss_pct) {
-              await ctx.broker.sell(pos.symbol, `Options stop loss at ${plPct.toFixed(1)}%`);
-            }
-          }
-        }
-
-        // Twitter breaking news
-        if (isTwitterEnabled(ctx)) {
-          const heldSymbols = positions.map((p) => p.symbol);
-          const breakingNews = await checkTwitterBreakingNews(ctx, heldSymbols);
-          for (const news of breakingNews) {
-            if (news.is_breaking) {
-              this.log("System", "twitter_breaking_news", {
-                symbol: news.symbol,
-                headline: news.headline.slice(0, 100),
-              });
-            }
+          case "crypto":
+            this.optionalStageLastRun.crypto = now;
+            await runCryptoTrading(ctx, positions);
+            break;
+          case "twitter": {
+            this.optionalStageLastRun.twitter = now;
+            const news = await checkTwitterBreakingNews(
+              ctx,
+              positions.map((p) => p.symbol)
+            );
+            for (const item of news)
+              if (item.is_breaking) {
+                this.log("System", "twitter_breaking_news", {
+                  symbol: item.symbol,
+                  headline: item.headline.slice(0, 100),
+                });
+              }
+            break;
           }
         }
       }
@@ -322,11 +481,12 @@ export class MahoragaHarness extends DurableObject<Env> {
       this.log("System", "alarm_error", { error: String(error) });
     }
 
-    await this.scheduleNextAlarm();
+    await this.scheduleNextAlarm(heartbeatDelayMs(now, Date.now()));
   }
 
-  private async scheduleNextAlarm(): Promise<void> {
-    const nextRun = Date.now() + 30_000;
+  private async scheduleNextAlarm(delayMs = 30_000): Promise<void> {
+    if (!this.state.enabled) return;
+    const nextRun = Date.now() + delayMs;
     await this.ctx.storage.setAlarm(nextRun);
   }
 
@@ -337,9 +497,12 @@ export class MahoragaHarness extends DurableObject<Env> {
   private async runDataGatherers(ctx: StrategyContext): Promise<void> {
     this.log("System", "gathering_data", {});
 
-    await tickerCache.refreshSecTickersIfNeeded();
-
-    const results = await Promise.allSettled(activeStrategy.gatherers.map((g) => g.gather(ctx)));
+    // The SEC ticker refresh is independent and must not serially delay feeds.
+    const [, results] = await Promise.all([
+      tickerCache.refreshSecTickersIfNeeded(),
+      Promise.allSettled(activeStrategy.gatherers.map((g) => gatherWithinDeadline(g, ctx, () => this.state.enabled))),
+    ]);
+    if (!this.state.enabled) return;
 
     const allSignals: Signal[] = [];
     const counts: Record<string, number> = {};
@@ -351,6 +514,7 @@ export class MahoragaHarness extends DurableObject<Env> {
         counts[name] = result.value.length;
       } else if (result) {
         counts[name] = 0;
+        this.log("System", "gatherer_failed", { source: name, error: String(result.reason) });
       }
     }
 
@@ -489,7 +653,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     const allSignals = this.state.signalCache;
     const notHeld = allSignals.filter((s) => !heldSymbols.has(s.symbol));
     const aboveThreshold = notHeld.filter((s) => s.raw_sentiment >= this.state.config.min_sentiment_score);
-    const candidates = aboveThreshold.sort((a, b) => b.sentiment - a.sentiment).slice(0, limit);
+    const candidates = aboveThreshold.sort((a, b) => b.sentiment - a.sentiment);
 
     if (candidates.length === 0) {
       this.log("SignalResearch", "no_candidates", {
@@ -506,20 +670,25 @@ export class MahoragaHarness extends DurableObject<Env> {
     const aggregated = new Map<string, { symbol: string; sentiment: number; sources: string[] }>();
     for (const sig of candidates) {
       if (!aggregated.has(sig.symbol)) {
+        if (aggregated.size >= limit) continue;
         aggregated.set(sig.symbol, { symbol: sig.symbol, sentiment: sig.sentiment, sources: [sig.source] });
       } else {
         aggregated.get(sig.symbol)!.sources.push(sig.source);
       }
     }
 
-    const results: ResearchResult[] = [];
-    for (const [symbol, data] of aggregated) {
-      const analysis = await this.callSignalResearch(ctx, symbol, data.sentiment, data.sources);
-      if (analysis) results.push(analysis);
-      await this.sleep(500);
-    }
-
-    return results;
+    // Record attempts independently of successes: a provider failure for the
+    // strongest symbol must not monopolize every research stage.
+    const attempts = ctx.state.get<Record<string, number>>("signalResearchAttempts") ?? {};
+    const symbol = leastRecentlyResearched([...aggregated.keys()], this.state.signalResearch, attempts);
+    if (!symbol || !this.state.enabled) return [];
+    const data = aggregated.get(symbol)!;
+    const cutoff = Date.now() - 86_400_000;
+    for (const [key, timestamp] of Object.entries(attempts)) if (timestamp < cutoff) delete attempts[key];
+    attempts[symbol] = Date.now();
+    ctx.state.set("signalResearchAttempts", attempts);
+    const analysis = await this.callSignalResearch(ctx, symbol, data.sentiment, data.sources);
+    return analysis ? [analysis] : [];
   }
 
   private async callSignalResearch(
@@ -538,17 +707,29 @@ export class MahoragaHarness extends DurableObject<Env> {
       const alpaca = createAlpacaProviders(this.env);
       const crypto = isCryptoSymbol(symbol, this.state.config.crypto_symbols || []);
       let price = 0;
+      // The snapshot already carries today's bar, the previous daily bar, the
+      // last minute bar and the quote. Deriving liquidity and extension from it
+      // costs no additional requests.
+      let market: MarketContext | null = null;
       if (crypto) {
         const snapshot = await alpaca.marketData.getCryptoSnapshot(normalizeCryptoSymbol(symbol)).catch(() => null);
         price = snapshot?.latest_trade?.price || snapshot?.latest_quote?.ask_price || 0;
       } else {
-        const snapshot = await alpaca.marketData.getSnapshot(symbol).catch(() => null);
+        // Snapshot and daily bars in parallel: the snapshot gives liquidity and
+        // extension, the bars give ATR, RSI, trend and the 52-week high. A full
+        // year is needed for the last of those to mean what it says.
+        const [snapshot, bars] = await Promise.all([
+          alpaca.marketData.getSnapshot(symbol, { feed: "iex" }).catch(() => null),
+          alpaca.marketData.getBars(symbol, "1Day", { limit: 252 }).catch(() => [] as Bar[]),
+        ]);
         price = snapshot?.latest_trade?.price || snapshot?.latest_quote?.ask_price || 0;
+        market = withTechnicals(deriveMarketContext(snapshot), bars);
       }
 
-      const prompt = activeStrategy.prompts.researchSignal(symbol, sentiment, sources, price, ctx);
+      const headlines = (this.state.newsCache ?? {})[symbol] ?? [];
+      const prompt = activeStrategy.prompts.researchSignal(symbol, sentiment, sources, price, ctx, market, headlines);
 
-      const response = await this._llm.complete({
+      const response = await this.completeWithBudget({
         model: prompt.model || this.state.config.llm_model,
         messages: [
           { role: "system", content: prompt.system },
@@ -567,15 +748,18 @@ export class MahoragaHarness extends DurableObject<Env> {
         );
       }
 
-      const content = response.content || "{}";
-      const analysis = JSON.parse(content.replace(/```json\n?|```/g, "").trim()) as {
-        verdict: "BUY" | "SKIP" | "WAIT";
-        confidence: number;
-        entry_quality: "excellent" | "good" | "fair" | "poor";
-        reasoning: string;
-        red_flags: string[];
-        catalysts: string[];
-      };
+      // JSON mode guarantees syntax, not shape. Validate before this becomes an
+      // order: an unvalidated empty object yields an undefined verdict, and the
+      // gates would be comparing against undefined rather than refusing.
+      const parsed = SignalResearchResponseSchema.safeParse(parseJsonObject(response.content || "{}"));
+      if (!parsed.success) {
+        this.log("SignalResearch", "invalid_response", {
+          symbol,
+          issues: parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+        });
+        return null;
+      }
+      const analysis = parsed.data;
 
       const result: ResearchResult = {
         symbol,
@@ -583,9 +767,10 @@ export class MahoragaHarness extends DurableObject<Env> {
         confidence: analysis.confidence,
         entry_quality: analysis.entry_quality,
         reasoning: analysis.reasoning,
-        red_flags: analysis.red_flags || [],
-        catalysts: analysis.catalysts || [],
+        red_flags: analysis.red_flags,
+        catalysts: analysis.catalysts,
         timestamp: Date.now(),
+        market,
       };
 
       this.state.signalResearch[symbol] = result;
@@ -594,6 +779,15 @@ export class MahoragaHarness extends DurableObject<Env> {
         verdict: result.verdict,
         confidence: result.confidence,
         quality: result.entry_quality,
+        rejection: entryRejection(
+          symbol,
+          this.state.signalCache,
+          result,
+          this.state.config,
+          Date.now(),
+          this.state.recentExits ?? {},
+          (this.state.catalystCache ?? {}) as never
+        ),
       });
 
       if (result.verdict === "BUY") {
@@ -624,7 +818,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     const prompt = activeStrategy.prompts.researchPosition(position.symbol, position, plPct, ctx);
 
     try {
-      const response = await this._llm.complete({
+      const response = await this.completeWithBudget({
         model: prompt.model || this.state.config.llm_model,
         messages: [
           { role: "system", content: prompt.system },
@@ -643,13 +837,19 @@ export class MahoragaHarness extends DurableObject<Env> {
         );
       }
 
-      const content = response.content || "{}";
-      const analysis = JSON.parse(content.replace(/```json\n?|```/g, "").trim());
-      this.state.positionResearch[position.symbol] = { ...analysis, timestamp: Date.now() };
+      const parsed = PositionResearchResponseSchema.safeParse(parseJsonObject(response.content || "{}"));
+      if (!parsed.success) {
+        this.log("PositionResearch", "invalid_response", {
+          symbol: position.symbol,
+          issues: parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+        });
+        return;
+      }
+      this.state.positionResearch[position.symbol] = { ...parsed.data, timestamp: Date.now() };
       this.log("PositionResearch", "position_analyzed", {
         symbol: position.symbol,
-        recommendation: analysis.recommendation,
-        risk: analysis.risk_level,
+        recommendation: parsed.data.recommendation,
+        risk: parsed.data.risk_level,
       });
     } catch (error) {
       this.log("PositionResearch", "error", { symbol: position.symbol, message: String(error) });
@@ -679,7 +879,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     const prompt = activeStrategy.prompts.analyzeSignals(signals, positions, account, ctx);
 
     try {
-      const response = await this._llm.complete({
+      const response = await this.completeWithBudget({
         model: prompt.model || this.state.config.llm_analyst_model,
         messages: [
           { role: "system", content: prompt.system },
@@ -698,27 +898,27 @@ export class MahoragaHarness extends DurableObject<Env> {
         );
       }
 
-      const content = response.content || "{}";
-      const analysis = JSON.parse(content.replace(/```json\n?|```/g, "").trim()) as {
-        recommendations: Array<{
-          action: "BUY" | "SELL" | "HOLD";
-          symbol: string;
-          confidence: number;
-          reasoning: string;
-          suggested_size_pct?: number;
-        }>;
-        market_summary: string;
-        high_conviction_plays?: string[];
-      };
+      const envelope = AnalystResponseSchema.safeParse(parseJsonObject(response.content || "{}"));
+      if (!envelope.success) {
+        this.log("Analyst", "invalid_response", {
+          issues: envelope.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+        });
+        return { recommendations: [], market_summary: "", high_conviction: [] };
+      }
+
+      // Drop malformed recommendations individually; a single bad entry should
+      // not discard the rest of an otherwise usable batch.
+      const { valid, rejected } = parseAnalystRecommendations(envelope.data.recommendations);
 
       this.log("Analyst", "analysis_complete", {
-        recommendations: analysis.recommendations?.length || 0,
+        recommendations: valid.length,
+        rejected,
       });
 
       return {
-        recommendations: analysis.recommendations || [],
-        market_summary: analysis.market_summary || "",
-        high_conviction: analysis.high_conviction_plays || [],
+        recommendations: valid,
+        market_summary: envelope.data.market_summary,
+        high_conviction: envelope.data.high_conviction_plays,
       };
     } catch (error) {
       this.log("Analyst", "error", { message: String(error) });
@@ -744,13 +944,6 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     const heldSymbols = new Set(positions.map((p) => p.symbol));
     const socialSnapshot = this.getSocialSnapshotCache();
-
-    // Strategy exit decisions
-    const exits = activeStrategy.selectExits(ctx, positions, account);
-    for (const exit of exits) {
-      const result = await ctx.broker.sell(exit.symbol, exit.reason);
-      if (result) heldSymbols.delete(exit.symbol);
-    }
 
     if (positions.length >= this.state.config.max_positions || this.state.signalCache.length === 0) return;
 
@@ -797,7 +990,7 @@ export class MahoragaHarness extends DurableObject<Env> {
         heldSymbols.add(entry.symbol);
         const originalSignal = this.state.signalCache.find((s) => s.symbol === entry.symbol);
         const aggregatedSocial = socialSnapshot[entry.symbol];
-        this.state.positionEntries[entry.symbol] = {
+        this.state.positionEntries[entry.symbol] ??= {
           symbol: entry.symbol,
           entry_time: Date.now(),
           entry_price: 0,
@@ -809,6 +1002,7 @@ export class MahoragaHarness extends DurableObject<Env> {
           entry_reason: entry.reason,
           peak_price: 0,
           peak_sentiment: aggregatedSocial?.sentiment ?? originalSignal?.sentiment ?? finalConfidence,
+          ...this.sizedTradeFor(entry.symbol, account.equity),
         };
       }
     }
@@ -853,10 +1047,8 @@ export class MahoragaHarness extends DurableObject<Env> {
         if (entrySymbols.has(rec.symbol)) continue;
 
         const sizePct = Math.min(20, this.state.config.position_size_pct_of_cash);
-        const notional = Math.min(
-          account.cash * (sizePct / 100) * rec.confidence,
-          this.state.config.max_position_value
-        );
+        const sized = this.sizedTradeFor(rec.symbol, account.equity);
+        const notional = Math.min(account.cash * (sizePct / 100) * rec.confidence, sized.notional);
         if (notional < 100) continue;
 
         const result = await ctx.broker.buy(rec.symbol, notional, rec.reasoning);
@@ -864,7 +1056,7 @@ export class MahoragaHarness extends DurableObject<Env> {
           const originalSignal = this.state.signalCache.find((s) => s.symbol === rec.symbol);
           const aggregatedSocial = socialSnapshot[rec.symbol];
           heldSymbols.add(rec.symbol);
-          this.state.positionEntries[rec.symbol] = {
+          this.state.positionEntries[rec.symbol] ??= {
             symbol: rec.symbol,
             entry_time: Date.now(),
             entry_price: 0,
@@ -876,6 +1068,8 @@ export class MahoragaHarness extends DurableObject<Env> {
             entry_reason: rec.reasoning,
             peak_price: 0,
             peak_sentiment: aggregatedSocial?.sentiment ?? originalSignal?.sentiment ?? rec.confidence,
+            stop_pct: sized.stop_pct,
+            target_pct: sized.target_pct,
           };
         }
       }
@@ -939,7 +1133,8 @@ export class MahoragaHarness extends DurableObject<Env> {
       researched: Object.keys(this.state.signalResearch).length,
     });
 
-    const signalResearch = await this.researchTopSignals(ctx, 10);
+    // Research is its own one-symbol stage; planning only consumes its cache.
+    const signalResearch = Object.values(this.state.signalResearch);
     const analysis = await this.callAnalystLLM(ctx, this.state.signalCache, positions, account);
 
     this.state.premarketPlan = {
@@ -991,8 +1186,13 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     // Sells first
     for (const rec of this.state.premarketPlan.recommendations) {
-      if (rec.action === "SELL" && rec.confidence >= this.state.config.min_analyst_confidence) {
+      if (
+        rec.action === "SELL" &&
+        rec.confidence >= this.state.config.min_analyst_confidence &&
+        heldSymbols.has(rec.symbol)
+      ) {
         await ctx.broker.sell(rec.symbol, `Pre-market plan: ${rec.reasoning}`);
+        heldSymbols.delete(rec.symbol);
       }
     }
 
@@ -1003,10 +1203,8 @@ export class MahoragaHarness extends DurableObject<Env> {
         if (positions.length >= this.state.config.max_positions) break;
 
         const sizePct = Math.min(20, this.state.config.position_size_pct_of_cash);
-        const notional = Math.min(
-          account.cash * (sizePct / 100) * rec.confidence,
-          this.state.config.max_position_value
-        );
+        const sized = this.sizedTradeFor(rec.symbol, account.equity);
+        const notional = Math.min(account.cash * (sizePct / 100) * rec.confidence, sized.notional);
         if (notional < 100) continue;
 
         const result = await ctx.broker.buy(rec.symbol, notional, `Pre-market plan: ${rec.reasoning}`);
@@ -1014,7 +1212,7 @@ export class MahoragaHarness extends DurableObject<Env> {
           heldSymbols.add(rec.symbol);
           const originalSignal = this.state.signalCache.find((s) => s.symbol === rec.symbol);
           const aggregatedSocial = socialSnapshot[rec.symbol];
-          this.state.positionEntries[rec.symbol] = {
+          this.state.positionEntries[rec.symbol] ??= {
             symbol: rec.symbol,
             entry_time: Date.now(),
             entry_price: 0,
@@ -1026,6 +1224,8 @@ export class MahoragaHarness extends DurableObject<Env> {
             entry_reason: rec.reasoning,
             peak_price: 0,
             peak_sentiment: aggregatedSocial?.sentiment ?? originalSignal?.sentiment ?? 0,
+            stop_pct: sized.stop_pct,
+            target_pct: sized.target_pct,
           };
         }
       }
@@ -1173,6 +1373,8 @@ export class MahoragaHarness extends DurableObject<Env> {
         signals: this.state.signalCache,
         logs: this.state.logs.slice(-100),
         costs: this.state.costTracker,
+        llmDailyBudget: this.state.llmDailyBudget ?? null,
+        pendingExecutions: this.state.pendingExecutions ?? {},
         lastAnalystRun: this.state.lastAnalystRun,
         lastResearchRun: this.state.lastResearchRun,
         lastPositionResearchRun: this.state.lastPositionResearchRun,
@@ -1205,6 +1407,16 @@ export class MahoragaHarness extends DurableObject<Env> {
   }
 
   private async handleEnable(): Promise<Response> {
+    this.initializeLLM();
+    if (!this._llm || !this.env.ALPACA_API_KEY?.trim() || !this.env.ALPACA_API_SECRET?.trim()) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Configure Alpaca and the selected LLM provider before enabling." }),
+        {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
     this.state.enabled = true;
     await this.persist();
     await this.scheduleNextAlarm();
@@ -1304,6 +1516,27 @@ export class MahoragaHarness extends DurableObject<Env> {
     this.state.costTracker.tokens_in += tokensIn;
     this.state.costTracker.tokens_out += tokensOut;
     return cost;
+  }
+
+  /**
+   * Size a trade for one symbol using the ATR captured with its research.
+   * Every entry path routes through here so stop, target and size stay
+   * consistent no matter which one originated the order.
+   */
+  private sizedTradeFor(symbol: string, equity: number) {
+    const atrPct = this.state.signalResearch?.[symbol]?.market?.atr_pct ?? null;
+    return volatilitySizedTrade(equity, this.state.config, atrPct);
+  }
+
+  /** Record an exit for the re-entry cooldown, pruning entries past the window. */
+  private recordExit(symbol: string, now = Date.now()): void {
+    if (!this.state.recentExits) this.state.recentExits = {};
+    this.state.recentExits[symbol.toUpperCase()] = now;
+
+    const keepMs = Math.max(this.state.config.reentry_cooldown_minutes, 1) * 60_000;
+    for (const [key, exitedAt] of Object.entries(this.state.recentExits)) {
+      if (!Number.isFinite(exitedAt) || now - exitedAt > keepMs) delete this.state.recentExits[key];
+    }
   }
 
   private async persist(): Promise<void> {

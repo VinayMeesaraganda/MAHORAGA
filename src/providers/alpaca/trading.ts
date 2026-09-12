@@ -207,6 +207,13 @@ export class AlpacaTradingProvider implements BrokerProvider {
     return this.client.tradingRequest<Order>("GET", `/v2/orders/${encodeURIComponent(orderId)}`);
   }
 
+  async getOrderByClientId(clientOrderId: string): Promise<Order> {
+    return this.client.tradingRequest<Order>(
+      "GET",
+      `/v2/orders:by_client_order_id?client_order_id=${encodeURIComponent(clientOrderId)}`
+    );
+  }
+
   async listOrders(params?: ListOrdersParams): Promise<Order[]> {
     let path = "/v2/orders";
 

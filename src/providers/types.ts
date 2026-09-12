@@ -159,6 +159,8 @@ export interface Asset {
 }
 
 export interface Bar {
+  /** Known source for completed historical bars; absent on legacy/latest responses. */
+  feed?: "iex" | "sip";
   t: string;
   o: number;
   h: number;
@@ -179,6 +181,8 @@ export interface Quote {
 }
 
 export interface Snapshot {
+  /** Set only when the provider request selected a feed explicitly. */
+  feed?: "iex" | "sip";
   symbol: string;
   latest_trade: {
     price: number;
@@ -189,6 +193,40 @@ export interface Snapshot {
   minute_bar: Bar;
   daily_bar: Bar;
   prev_daily_bar: Bar;
+}
+
+/** A Benzinga-sourced article from Alpaca's news feed, already tagged by symbol. */
+export interface MarketNewsItem {
+  id: number;
+  headline: string;
+  summary: string;
+  author: string;
+  source: string;
+  url: string;
+  symbols: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewsParams {
+  symbols?: string[];
+  start?: string;
+  limit?: number;
+}
+
+/** One row of the most-actives screener. */
+export interface MostActive {
+  symbol: string;
+  volume: number;
+  trade_count: number;
+}
+
+/** One row of the movers screener. */
+export interface Mover {
+  symbol: string;
+  price: number;
+  change: number;
+  percent_change: number;
 }
 
 export interface BarsParams {

@@ -77,6 +77,7 @@ async function twitterSearchRecent(
         Authorization: `Bearer ${ctx.env.TWITTER_BEARER_TOKEN}`,
         "Content-Type": "application/json",
       },
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (!res.ok) {
