@@ -188,3 +188,49 @@ describe("equity exits", () => {
     expect(exits[0]?.reason).toMatch(/Stop loss/);
   });
 });
+
+describe("gap capture", () => {
+  // From a live example: entered before earnings, the stock ran 15% after
+  // hours, the target was never reached, and the whole gain was given back the
+  // next morning. At that name's real 13.4% ATR-derived stop, +15% is 1.12R —
+  // below the 1.5R the trail arms at, and the trail could not have seen an
+  // after-hours price anyway.
+  const cfg = { trailing_stop_pct: 0, gap_capture_r: 1.0, max_hold_days: 0 };
+  const entry13 = () => entry({ entry_price: 100, peak_price: 100, stop_pct: 13.4, target_pct: 26.8 });
+
+  it("takes a gapped gain at the first check of the session", () => {
+    const ctx = context(cfg, { AAPL: entry13() });
+    const exits = selectExits(ctx, [position({ current_price: 115, market_value: 1150, unrealized_pl: 150 })], account);
+    expect(exits[0]?.reason).toMatch(/Gap capture/);
+    expect(exits[0]?.reason).toMatch(/1\.12R/);
+  });
+
+  it("runs once per session, not on every alarm", () => {
+    const entries = { AAPL: entry13() };
+    const ctx = context(cfg, entries);
+    const pos = [position({ current_price: 115, market_value: 1150, unrealized_pl: 150 })];
+    expect(selectExits(ctx, pos, account)).toHaveLength(1);
+    // Second alarm the same day: already checked, so it must not fire again.
+    expect(selectExits(ctx, pos, account)).toHaveLength(0);
+  });
+
+  it("leaves a gain below the threshold alone", () => {
+    const ctx = context(cfg, { AAPL: entry13() });
+    // +10% on a 13.4% stop is 0.75R — not enough to abandon the target.
+    expect(selectExits(ctx, [position({ current_price: 110, market_value: 1100, unrealized_pl: 100 })], account)).toEqual([]);
+  });
+
+  it("is disabled at zero and never fires on a loss", () => {
+    const off = context({ ...cfg, gap_capture_r: 0 }, { AAPL: entry13() });
+    expect(selectExits(off, [position({ current_price: 115, market_value: 1150, unrealized_pl: 150 })], account)).toEqual([]);
+    const losing = context(cfg, { AAPL: entry13() });
+    expect(selectExits(losing, [position({ current_price: 96, market_value: 960, unrealized_pl: -40 })], account)).toEqual([]);
+  });
+
+  it("does not pre-empt a genuine target hit", () => {
+    // At +27% the target is reached; that path should win, not gap capture.
+    const ctx = context(cfg, { AAPL: entry13() });
+    const exits = selectExits(ctx, [position({ current_price: 127, market_value: 1270, unrealized_pl: 270 })], account);
+    expect(exits[0]?.reason).toMatch(/Take profit/);
+  });
+});

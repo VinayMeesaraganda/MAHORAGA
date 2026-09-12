@@ -92,6 +92,15 @@ export const AgentConfigSchema = z
      */
     trailing_arm_r: z.number().min(0).max(10).default(0),
     trailing_stop_r: z.number().min(0).max(10).default(0),
+    /**
+     * Take an overnight gain handed over by a gap, in R, at the first exit
+     * check of the session. A gap is not a move the position earned intraday
+     * and the trail cannot see it: extended-hours prices never reach
+     * peak_price because exits only run while the market is open, and no exit
+     * could be taken then anyway. Holding for the remainder of the target
+     * risks giving the whole gap back at the open. 0 disables.
+     */
+    gap_capture_r: z.number().min(0).max(5).default(0),
     /** Deterministic time stop, independent of social-history availability. 0 disables. */
     max_hold_days: z.number().min(0).max(60).default(0),
 

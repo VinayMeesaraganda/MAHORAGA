@@ -1038,6 +1038,49 @@ outcome for the wrong reason: the event is absent from the vocabulary rather
 than judged and declined. Buying bad news on the view that the market has
 overreacted is a contrarian thesis, and this system does not hold one.
 
+## Overnight gap capture — September 12, 2026
+
+Tested against a second live example: entered before an earnings report on the
+view that guidance would be beaten, which it was; the stock ran 15% after hours,
+the target was never reached, and the whole gain was given back the following
+morning, leaving the position 5% under the entry.
+
+Traced against the real code at that name's measured 5.36% ATR:
+
+| | |
+|---|---|
+| Entry before earnings | **blocked** — all six phrasings caught by the red-flag gate |
+| Stop (2.5 × ATR) | 13.4% |
+| Target (2R) | 26.8% |
+| Trail arms at | +20.1% (1.5R) |
+| The +15% after hours | 1.12R — below the target and below the trail arm |
+| The -5% next day | above the stop, so no exit |
+
+Had it held through, it would be sitting exactly where the trade ended up. The
+entry block is the real protection here and it works; everything after it does
+not.
+
+Two structural reasons the gain could not be kept. `peak_price` only updates
+inside `selectExits`, which runs while the market is open, so an extended-hours
+high is never recorded and the trail cannot arm on it. And no exit could have
+been taken then regardless: the policy allows regular hours only.
+
+`gap_capture_r` therefore takes an overnight gain at the first exit check of a
+session when it exceeds the threshold, once per session rather than on every
+alarm, and after the stop and target so a genuine target hit still wins.
+
+Set to 1.5, matching the trail's arm point. The reasoning is that a gap hands
+over a gain the trail would have protected had it been earned intraday, and
+since the trail structurally cannot see it, capture is the substitute. A lower
+setting cuts winners earlier than the trail itself would.
+
+This is contested rather than settled. Post-earnings drift argues the move
+continues, while the example gave it all back overnight; 1.0R would have caught
+that trade and 1.5R would not. Registered in `config/hypotheses.json` before the
+rule has fired once, falsified if gap-captured exits underperform positions held
+to a level — which would mean gaps continue more often than they fade and the
+rule is cutting winners.
+
 ## Diagnostics and reusable instructions
 
 ```bash

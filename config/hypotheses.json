@@ -94,6 +94,19 @@
       "min_per_group": 25,
       "falsified_if": "insider clusters do not beat earnings beats, which would argue for dropping the source rather than keeping a sixth input that adds no edge",
       "registered": "2026-09-12, before the source produced a single trade"
+    },
+    {
+      "id": "gap-capture",
+      "question": "Do gap-captured exits produce a higher mean R than the same positions held to a level would have?",
+      "compare": [
+        "cause:gap_capture",
+        "cause:target_hit+stop_loss+trailing"
+      ],
+      "min_effect_r": 0.8,
+      "min_per_group": 25,
+      "falsified_if": "gap capture underperforms, which would mean the gap continues more often than it fades and the rule is cutting winners",
+      "note": "Tension with post-earnings drift: the literature says the move continues, while a live example gave the whole gap back overnight. Set at 1.5R to match the trail arm rather than to fit that one trade; 1.0R would have caught it but cuts more winners.",
+      "registered": "2026-09-12, before the rule has fired once"
     }
   ]
 }

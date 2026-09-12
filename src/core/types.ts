@@ -70,6 +70,8 @@ export interface PositionEntry {
   target_pct?: number;
   /** Daily ATR at entry, so an exit can ask whether the adverse move was ordinary. */
   atr_pct?: number;
+  /** ET day of the last gap check, so it runs once per session rather than every alarm. */
+  last_gap_check_day?: string;
 }
 
 // ---------------------------------------------------------------------------

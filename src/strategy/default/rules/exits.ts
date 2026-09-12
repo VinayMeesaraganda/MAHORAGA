@@ -82,6 +82,27 @@ export function selectExits(ctx: StrategyContext, positions: Position[], _accoun
       continue;
     }
 
+    // An overnight gap hands over a gain the position never earned intraday, and
+    // nothing here can see or act on it while it happens: extended-hours prices
+    // never reach peak_price because exits run only while the market is open,
+    // and no exit could be taken then in any case. So the first check of a
+    // session is the only chance to keep it. Above the threshold, take it rather
+    // than hold for the remainder of a target the gap may have already retraced.
+    if (ctx.config.gap_capture_r > 0 && posEntry && stopPct > 0) {
+      const today = new Date().toISOString().slice(0, 10);
+      if (posEntry.last_gap_check_day !== today) {
+        posEntry.last_gap_check_day = today;
+        const r = plPct / stopPct;
+        if (r >= ctx.config.gap_capture_r) {
+          exits.push({
+            symbol: pos.symbol,
+            reason: `Gap capture: session opened at +${plPct.toFixed(1)}% (${r.toFixed(2)}R) before the target`,
+          });
+          continue;
+        }
+      }
+    }
+
     // Trailing stop — protect an open gain once there is one worth protecting.
     // The arm threshold is deliberately separate from the give-back distance:
     // when they are equal the exit lands near break-even, which caps average

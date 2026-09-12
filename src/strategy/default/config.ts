@@ -88,6 +88,7 @@ export const DEFAULT_CONFIG: AgentConfig = {
   trailing_arm_pct: 0,
   trailing_arm_r: 0,
   trailing_stop_r: 0,
+  gap_capture_r: 0,
   max_hold_days: 0,
   exit_on_adverse_news: true,
   stale_position_enabled: true,

@@ -45,5 +45,6 @@
   "entry_min_range_position": 0.5,
   "trailing_arm_r": 1.5,
   "trailing_stop_r": 1.0,
-  "exit_on_adverse_news": true
+  "exit_on_adverse_news": true,
+  "gap_capture_r": 1.5
 }
