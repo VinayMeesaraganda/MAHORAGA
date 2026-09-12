@@ -28,7 +28,8 @@
     "paper:catalysts": "node scripts/push-catalysts.mjs",
     "paper:start": "node scripts/start-session.mjs",
     "paper:journal": "node scripts/journal.mjs",
-    "paper:check": "node scripts/session-status.mjs"
+    "paper:check": "node scripts/session-status.mjs",
+    "paper:review": "node scripts/review.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.35",

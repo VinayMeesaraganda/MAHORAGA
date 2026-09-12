@@ -1,0 +1,47 @@
+{
+  "_purpose": "Questions registered BEFORE the data exists. Pre-registration is the whole point: deciding what counts as an answer after seeing results is how noise becomes a conclusion.",
+  "_method": "Two-sample comparison of mean R, power 0.8 at alpha 0.05, so n per group is about 16/d^2. Effect sizes are the smallest difference worth acting on, not the one hoped for.",
+  "operational": [
+    { "id": "loop-runs", "question": "Does a full session complete without the alarm chain dying?", "answerable_after": "1 session" },
+    { "id": "entries-happen", "question": "Does at least one entry clear every gate in a live session?", "answerable_after": "1 week" },
+    { "id": "fills-reconcile", "question": "Do submitted orders reconcile to actual fills and positions?", "answerable_after": "first fill" },
+    { "id": "gates-sane", "question": "Are gate rejections for substantive reasons rather than data defects?", "answerable_after": "1 session" },
+    { "id": "budget-holds", "question": "Does the LLM budget last a full session at the configured cadence?", "answerable_after": "1 session" },
+    { "id": "journal-complete", "question": "Does every trade produce an entry thesis and an exit attribution?", "answerable_after": "first round trip" },
+    { "id": "feedback-harmless", "question": "After the record becomes non-empty, do entry rates fall or refusals cluster after losing streaks?", "answerable_after": "2 weeks post-first-close" }
+  ],
+  "statistical": [
+    {
+      "id": "guidance-vs-earnings",
+      "question": "Do guidance-raise catalysts produce a higher mean R than earnings beats?",
+      "compare": ["catalyst:guidance", "catalyst:earnings"],
+      "min_effect_r": 0.8,
+      "min_per_group": 25,
+      "falsified_if": "earnings mean R is equal or higher once both groups reach the sample"
+    },
+    {
+      "id": "discretionary-exits",
+      "question": "Do discretionary exits produce a higher mean R than trades that ran to a level?",
+      "compare": ["cause:discretionary", "cause:target_hit+stop_loss+trailing"],
+      "min_effect_r": 0.8,
+      "min_per_group": 25,
+      "falsified_if": "discretionary mean R is lower, which would argue for removing the LLM sell path"
+    },
+    {
+      "id": "confidence-predictive",
+      "question": "Do trades entered above 0.80 model confidence produce a higher mean R than those below 0.70?",
+      "compare": ["confidence:0.80+", "confidence:under 0.70"],
+      "min_effect_r": 0.5,
+      "min_per_group": 64,
+      "falsified_if": "no separation, which would mean confidence should stop scaling position size"
+    },
+    {
+      "id": "52w-threshold",
+      "question": "Do entries above 75% of the 52-week high produce a higher mean R than those between 70 and 75%?",
+      "compare": ["pct_of_52w_high:75+", "pct_of_52w_high:70-75"],
+      "min_effect_r": 0.5,
+      "min_per_group": 64,
+      "falsified_if": "no separation, which would argue for lowering the gate and taking more trades"
+    }
+  ]
+}

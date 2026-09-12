@@ -25,6 +25,45 @@ Do not reset or top up the paper account to erase losses. Record deposits/withdr
 
 Do not tune on future prices or repeatedly select the best parameter set on the same evaluation period. Social-history availability may prevent faithful backtests; record inputs prospectively rather than inventing historical sentiment. Retain a holdout period, version the code/configuration with every run, and include unsuccessful trials in results.
 
+## How learning actually happens
+
+Two tiers on two clocks, registered in `config/hypotheses.json` and reported by
+`npm run paper:review`.
+
+**Tier 1 asks whether the machinery behaves** and is answerable in the first
+session: does the alarm chain survive a full day, does an entry clear every
+gate, do submitted orders reconcile to fills, are gate rejections substantive
+rather than data defects, does the model budget last, does every trade produce a
+thesis and an attribution, and — once a record exists — do entry rates fall or
+refusals cluster after losing streaks. These are read from logs, not computed.
+Until they all pass, no statistical question is worth asking.
+
+**Tier 2 asks whether the strategy works** and needs samples that do not exist
+for months. At power 0.8 and alpha 0.05 a two-sample comparison of mean R needs
+roughly 16/d² per group:
+
+| Question | Smallest effect worth acting on | Per group | Weeks at 3 trades/week |
+|---|---:|---:|---:|
+| Guidance catalysts vs earnings beats | 0.8R | 25 | ~28 |
+| Discretionary exits vs running to a level | 0.8R | 25 | ~28 |
+| Confidence above 0.80 vs below 0.70 | 0.5R | 64 | ~72 |
+| 52-week gate at 75% vs 70% | 0.5R | 64 | ~72 |
+| Whether the range-position gate adds anything | 0.3R | 178 | ~198 |
+
+Most edge questions are therefore not answerable this year. That is the
+constraint, not a reason to lower the bar: a threshold moved on twelve
+observations has been moved on noise.
+
+The questions are registered before the data exists. Deciding what counts as an
+answer after seeing results is the failure this is built to prevent, and it is
+the reason each entry also records what would falsify it. `paper:review` reports
+sample progress per group and refuses to state a verdict until both sides reach
+the registered minimum.
+
+The rule that follows: change one thing at a time, record the date and commit,
+and keep the previous setting long enough to compare against. A change made
+before its question was answerable is a guess, not a learning.
+
 ## Cost discipline
 
 The slower baseline and small model reduce some usage, and a daily completion-attempt limit of 300 is now enforced, but no hard daily dollar cap exists. The harness cost tracker contains hard-coded model prices and is an estimate, not a billing authority. Check provider billing directly and choose a daily operating budget before unattended operation. Do not assume upstream's $0.50–2/day or free hosting estimate still applies.
