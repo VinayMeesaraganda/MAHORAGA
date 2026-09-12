@@ -833,6 +833,51 @@ or hurt is not knowable in advance: it is answerable only by grouping them and
 comparing realised R against trades that ran to a level. Until that comparison
 exists the path is left in place and measured rather than tuned.
 
+## Session startup as a script — September 12, 2026
+
+The pre-open scheduled tasks previously carried their shell in the prompt. That
+is re-interpreted by a fresh session every morning, cannot be tested, and has no
+exit code, so a failure is whatever the model decides to say about it. Both are
+now single commands backed by scripts.
+
+`npm run paper:start` runs the whole sequence in dependency order and stops at
+the first failure: whether the market trades today, starting the worker detached
+if it is not already running, probing credentials and the model, applying the
+profile, pushing catalysts, arming. `--dry-run` reports without changing
+anything, `--no-enable` rehearses without arming, `--force` overrides the
+non-trading-day exit.
+
+`npm run paper:check` reports state, gates, risk settings, catalyst age and
+recent errors, exiting non-zero with a numbered problem list so the scheduled
+task does not have to interpret prose to decide whether to raise an alarm.
+
+### Rehearsed before relying on it
+
+Nine cases were run against the live setup rather than reasoned about:
+
+| | Result |
+|---|---|
+| Non-trading day, no flag | Exits 0, "Holiday or weekend", nothing started |
+| Full dry run | All six steps reported, nothing changed |
+| Cold start, no worker running | Worker started detached, all steps green |
+| Unreachable non-local base | Stops at step 2, exit 1 |
+| Empty catalyst file | Stops at step 5, exit 1 |
+| Full green run | Armed, exit 0 |
+| Readiness check, healthy | Exit 0 |
+| Readiness check, agent disabled | Exit 1, names the fix |
+| Readiness check, worker down | Exit 1, names the fix |
+
+Two defects surfaced that reasoning had not. The dry run failed at the doctor
+because that check includes the local worker, which a dry run deliberately does
+not start; the worker line is now excluded on a dry run while the credential and
+model lines still gate. And an empty catalyst file produced "SyntaxError:
+Unexpected end of JSON input" rather than saying the cache was empty —
+`push-catalysts` legitimately exits 0 and prints no JSON when nothing qualifies.
+Both are the kind of message that would have been read at 09:06 on a Monday.
+
+The tasks are instructed not to edit configuration or catalyst data to clear a
+failing check. A failing check before the open is the reason for running it.
+
 ## Diagnostics and reusable instructions
 
 ```bash
