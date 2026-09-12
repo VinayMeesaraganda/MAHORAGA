@@ -1,0 +1,206 @@
+{
+  "_source": "broker earnings calendar, 2026-09-08..2026-09-11",
+  "_note": "Raw EPS rows. push-catalysts.mjs grades the surprise and drops misses and sub-3% moves.",
+  "earnings": [
+    {
+      "symbol": "ABM",
+      "quarter": 3,
+      "estimate": 1.01,
+      "actual": 1.04,
+      "date": "2026-09-08",
+      "timing": "am"
+    },
+    {
+      "symbol": "GME",
+      "quarter": 2,
+      "estimate": 0.06,
+      "actual": 0.27,
+      "date": "2026-09-08",
+      "timing": "am"
+    },
+    {
+      "symbol": "BRZE",
+      "quarter": 2,
+      "estimate": 0.08,
+      "actual": 0.19,
+      "date": "2026-09-08",
+      "timing": "pm"
+    },
+    {
+      "symbol": "AVO",
+      "quarter": 3,
+      "estimate": 0.11,
+      "actual": 0.18,
+      "date": "2026-09-08",
+      "timing": "pm"
+    },
+    {
+      "symbol": "CASY",
+      "quarter": 1,
+      "estimate": 6.77,
+      "actual": 7.37,
+      "date": "2026-09-08",
+      "timing": "pm"
+    },
+    {
+      "symbol": "TTAN",
+      "quarter": 2,
+      "estimate": 0.26,
+      "actual": 0.4,
+      "date": "2026-09-08",
+      "timing": "pm"
+    },
+    {
+      "symbol": "UNFI",
+      "quarter": 4,
+      "estimate": 0.62,
+      "actual": 0.69,
+      "date": "2026-09-08",
+      "timing": "am"
+    },
+    {
+      "symbol": "SIG",
+      "quarter": 2,
+      "estimate": 1.73,
+      "actual": 2.19,
+      "date": "2026-09-09",
+      "timing": "am"
+    },
+    {
+      "symbol": "ASO",
+      "quarter": 2,
+      "estimate": 2.08,
+      "actual": 2.31,
+      "date": "2026-09-09",
+      "timing": "am"
+    },
+    {
+      "symbol": "COO",
+      "quarter": 3,
+      "estimate": 1.12,
+      "actual": 1.15,
+      "date": "2026-09-09",
+      "timing": "pm"
+    },
+    {
+      "symbol": "AVAV",
+      "quarter": 1,
+      "estimate": 0.24,
+      "actual": 0.59,
+      "date": "2026-09-09",
+      "timing": "pm"
+    },
+    {
+      "symbol": "SAIL",
+      "quarter": 2,
+      "estimate": 0.08,
+      "actual": 0.09,
+      "date": "2026-09-09",
+      "timing": "am"
+    },
+    {
+      "symbol": "SUNB",
+      "quarter": 1,
+      "estimate": 1.02,
+      "actual": 1.18,
+      "date": "2026-09-09",
+      "timing": "am"
+    },
+    {
+      "symbol": "AEO",
+      "quarter": 2,
+      "estimate": 0.27,
+      "actual": 0.79,
+      "date": "2026-09-09",
+      "timing": "pm"
+    },
+    {
+      "symbol": "CNM",
+      "quarter": 2,
+      "estimate": 0.81,
+      "actual": 0.94,
+      "date": "2026-09-09",
+      "timing": "am"
+    },
+    {
+      "symbol": "KFY",
+      "quarter": 1,
+      "estimate": 1.36,
+      "actual": 1.43,
+      "date": "2026-09-09",
+      "timing": "am"
+    },
+    {
+      "symbol": "ADBE",
+      "quarter": 3,
+      "estimate": 5.84,
+      "actual": 6.13,
+      "date": "2026-09-10",
+      "timing": "pm"
+    },
+    {
+      "symbol": "ORCL",
+      "quarter": 1,
+      "estimate": 1.67,
+      "actual": 1.92,
+      "date": "2026-09-10",
+      "timing": "pm"
+    },
+    {
+      "symbol": "RH",
+      "quarter": 2,
+      "estimate": 1.78,
+      "actual": 2.7,
+      "date": "2026-09-10",
+      "timing": "pm"
+    },
+    {
+      "symbol": "TEN",
+      "quarter": 2,
+      "estimate": 2.4,
+      "actual": 3.14,
+      "date": "2026-09-10",
+      "timing": "am"
+    },
+    {
+      "symbol": "M",
+      "quarter": 2,
+      "estimate": 0.35,
+      "actual": 0.4,
+      "date": "2026-09-10",
+      "timing": "am"
+    },
+    {
+      "symbol": "CPRT",
+      "quarter": 4,
+      "estimate": 0.38,
+      "actual": 0.35,
+      "date": "2026-09-10",
+      "timing": "pm"
+    },
+    {
+      "symbol": "KR",
+      "quarter": 2,
+      "estimate": 1.12,
+      "actual": 1.09,
+      "date": "2026-09-11",
+      "timing": "am"
+    },
+    {
+      "symbol": "FIZZ",
+      "quarter": 1,
+      "estimate": 0.59,
+      "actual": 0.5,
+      "date": "2026-09-10",
+      "timing": "pm"
+    },
+    {
+      "symbol": "DSGX",
+      "quarter": 2,
+      "estimate": 0.7,
+      "actual": 0.57,
+      "date": "2026-09-10",
+      "timing": "pm"
+    }
+  ]
+}

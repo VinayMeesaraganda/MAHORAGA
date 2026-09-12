@@ -15,12 +15,12 @@ import type { PolicyConfig } from "../policy/config";
 import { type PolicyContext, PolicyEngine } from "../policy/engine";
 import type { AlpacaProviders } from "../providers/alpaca";
 import type { Account, MarketClock, Order, Position } from "../providers/types";
-import type { PendingExecution } from "./types";
 import type { D1Client } from "../storage/d1/client";
 import type { RiskState } from "../storage/d1/queries/risk-state";
 import { getRiskState } from "../storage/d1/queries/risk-state";
 import { isCryptoSymbol, normalizeCryptoSymbol } from "../strategy/default/helpers/crypto";
 import type { StrategyContext } from "../strategy/types";
+import type { PendingExecution } from "./types";
 
 export interface PolicyBrokerDeps {
   alpaca: AlpacaProviders;
@@ -80,13 +80,20 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
           // DELETE /positions cannot accept our client ID. After a timeout,
           // identify a unique recent sell; ambiguous/missing results stay blocked.
           const orders = await alpaca.trading.listOrders({
-            status: "all", symbols: [symbol], after: new Date(intent.submitted_at - 2000).toISOString(), limit: 100,
+            status: "all",
+            symbols: [symbol],
+            after: new Date(intent.submitted_at - 2000).toISOString(),
+            limit: 100,
           });
           const matches = orders.filter((o) => {
             const submitted = Date.parse(o.submitted_at);
-            return o.symbol === symbol && o.side === "sell" &&
-              submitted >= intent.submitted_at - 2000 && submitted <= intent.submitted_at + 12_000 &&
-              Number(o.qty) === intent.expected_qty;
+            return (
+              o.symbol === symbol &&
+              o.side === "sell" &&
+              submitted >= intent.submitted_at - 2000 &&
+              submitted <= intent.submitted_at + 12_000 &&
+              Number(o.qty) === intent.expected_qty
+            );
           });
           if (matches.length === 1) order = matches[0];
         }
@@ -99,8 +106,13 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
           if (matching.some((p) => !Number.isFinite(p.qty))) continue;
           const held = matching.some((p) => Math.abs(p.qty) > 0);
           const filledQty = Number(order.filled_qty);
-          if (typeof order.filled_qty !== "string" || !order.filled_qty.trim() ||
-              !Number.isFinite(filledQty) || filledQty < 0) continue;
+          if (
+            typeof order.filled_qty !== "string" ||
+            !order.filled_qty.trim() ||
+            !Number.isFinite(filledQty) ||
+            filledQty < 0
+          )
+            continue;
           if (intent.side === "buy" && (filledQty > 0 || order.status === "filled") && !held) continue;
           if (intent.side === "sell" && !held) deps.onSell?.(symbol, intent.reason);
           if (intent.side === "buy" && !held) deps.onBuyAbandoned?.(symbol);
@@ -280,8 +292,12 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
       if (!isCrypto && deps.validateBuy?.(symbol)) return false;
       const clientOrderId = `mahoraga-${crypto.randomUUID()}`;
       ownIntent = {
-        symbol: orderSymbol, side: "buy", reason, submitted_at: Date.now(),
-        client_order_id: clientOrderId, status: "submitting",
+        symbol: orderSymbol,
+        side: "buy",
+        reason,
+        submitted_at: Date.now(),
+        client_order_id: clientOrderId,
+        status: "submitting",
       };
       pendingExecutions[orderSymbol] = ownIntent;
       deps.onBuyIntent?.(symbol, notional, reason, account);
@@ -366,7 +382,12 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
       if (!holding || !Number.isFinite(holding.qty) || holding.qty <= 0 || holding.side === "short") return false;
       if (open.length || pendingExecutions[symbol] || (deps.canSubmit && !deps.canSubmit())) return false;
       ownIntent = {
-        symbol, side: "sell", reason, submitted_at: Date.now(), status: "submitting", expected_qty: holding.qty,
+        symbol,
+        side: "sell",
+        reason,
+        submitted_at: Date.now(),
+        status: "submitting",
+        expected_qty: holding.qty,
       };
       pendingExecutions[symbol] = ownIntent;
       await persist();

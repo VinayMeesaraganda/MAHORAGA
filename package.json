@@ -24,7 +24,9 @@
     "doctor": "node scripts/doctor.mjs",
     "paper:apply": "node scripts/paper-control.mjs apply",
     "paper:status": "node scripts/paper-control.mjs status",
-    "paper:stop": "node scripts/paper-control.mjs kill"
+    "paper:stop": "node scripts/paper-control.mjs kill",
+    "paper:catalysts": "node scripts/push-catalysts.mjs",
+    "paper:start": "node scripts/start-session.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.35",

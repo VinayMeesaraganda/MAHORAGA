@@ -10,10 +10,10 @@
  */
 
 import { DurableObject } from "cloudflare:workers";
-import { createPolicyBroker } from "../core/policy-broker";
 import { freshEntryMarket } from "../core/execution-market";
-import { reserveRequest } from "../core/request-budget";
 import { gatherWithinDeadline } from "../core/gather-boundary";
+import { createPolicyBroker } from "../core/policy-broker";
+import { reserveRequest } from "../core/request-budget";
 import {
   closedMarketDelayMs,
   HEARTBEAT_INTERVAL_MS,
@@ -45,6 +45,7 @@ import type {
 } from "../providers/types";
 import type { AgentConfig } from "../schemas/agent-config";
 import { safeValidateAgentConfig } from "../schemas/agent-config";
+import { IngestedCatalystsSchema } from "../schemas/catalyst-ingest";
 import {
   AnalystResponseSchema,
   PositionResearchResponseSchema,
@@ -1288,6 +1289,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       "signals",
       "history",
       "setup/status",
+      "catalysts",
     ];
     if (protectedActions.includes(action)) {
       if (!this.isAuthorized(request)) return this.unauthorizedResponse();
@@ -1295,6 +1297,8 @@ export class MahoragaHarness extends DurableObject<Env> {
 
     try {
       switch (action) {
+        case "catalysts":
+          return this.handleCatalysts(request);
         case "status":
           return this.handleStatus();
         case "setup/status":
@@ -1386,6 +1390,71 @@ export class MahoragaHarness extends DurableObject<Env> {
         stalenessAnalysis: this.state.stalenessAnalysis,
       },
     });
+  }
+
+  /**
+   * Read or ingest catalysts.
+   *
+   * The strongest catalyst source available is an earnings calendar with actual
+   * versus estimated EPS, and no free endpoint reachable from a Worker supplies
+   * it. This lets an outside process push what it has — a scheduled job, a
+   * broker connector, a paid calendar — into the same cache the news gatherer
+   * fills, so the entry gate treats every source identically.
+   *
+   * Ingested entries are merged rather than replacing the cache, deduplicated by
+   * symbol and headline, and pruned by the configured age window on the next
+   * gather pass like any other catalyst.
+   */
+  private async handleCatalysts(request: Request): Promise<Response> {
+    if (request.method !== "POST") {
+      return this.jsonResponse({ ok: true, catalysts: this.state.catalystCache ?? {} });
+    }
+
+    const body = (await request.json().catch(() => null)) as { catalysts?: unknown } | null;
+    const parsed = IngestedCatalystsSchema.safeParse(body);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: "Invalid catalyst payload",
+          issues: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const now = Date.now();
+    const maxAgeMs = Math.max(1, this.state.config.entry_max_catalyst_age_minutes) * 60_000;
+    const cache = (this.state.catalystCache ?? {}) as Record<string, Array<Record<string, unknown>>>;
+    let accepted = 0;
+    let expired = 0;
+
+    for (const entry of parsed.data.catalysts) {
+      const at = Date.parse(entry.at);
+      // A stale catalyst is not evidence; reject rather than silently backdate.
+      if (!Number.isFinite(at) || at > now || now - at > maxAgeMs) {
+        expired++;
+        continue;
+      }
+      const symbol = entry.symbol.toUpperCase();
+      const list = (cache[symbol] ??= []);
+      if (list.some((h) => h.headline === entry.headline)) continue;
+      list.push({
+        type: entry.type,
+        quality: entry.quality,
+        matched: entry.type,
+        headline: entry.headline,
+        symbol,
+        at,
+      });
+      if (list.length > 5) list.shift();
+      accepted++;
+    }
+
+    this.state.catalystCache = cache;
+    await this.persist();
+    this.log("System", "catalysts_ingested", { accepted, expired, symbols: Object.keys(cache).length });
+    return this.jsonResponse({ ok: true, accepted, expired, symbols: Object.keys(cache).length });
   }
 
   private async handleUpdateConfig(request: Request): Promise<Response> {

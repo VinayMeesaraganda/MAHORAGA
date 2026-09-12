@@ -38,10 +38,10 @@
   "stop_min_pct": 3,
   "stop_max_pct": 15,
   "target_r_multiple": 2,
-  "entry_min_pct_of_52w_high": 75,
+  "entry_min_pct_of_52w_high": 70,
   "entry_require_catalyst": true,
   "entry_min_catalyst_quality": "medium",
-  "entry_max_catalyst_age_minutes": 1440,
+  "entry_max_catalyst_age_minutes": 14400,
   "entry_min_range_position": 0.5,
   "trailing_arm_r": 1.5,
   "trailing_stop_r": 1.0

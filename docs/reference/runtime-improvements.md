@@ -650,6 +650,69 @@ dates, EPS surprises, float and sector classification that Alpaca does not.
 Sector classification in particular would close the loop between the sector
 leadership table and individual candidates, which the Worker currently cannot do.
 
+## Earnings catalyst bridge — September 12, 2026
+
+Profile revision `paper-baseline` r7.
+
+The catalyst requirement was starving. Classifying a real trading session's news
+feed produced nine catalysts from fifty articles, eight of them analyst price
+target changes graded low, leaving one that met the medium threshold. The
+classifier was grading correctly; the feed is the limitation. Alpaca's news
+carries analyst actions, earnings-call transcripts and halt notices rather than
+the primary corporate announcements the taxonomy was built around.
+
+The strongest available catalyst is an earnings calendar with actual against
+estimated EPS, and no free endpoint reachable from a Worker supplies one.
+`POST /agent/catalysts` accepts catalysts from outside and merges them into the
+same cache the news gatherer fills, so every source meets the same entry gate.
+The payload is validated as strictly as model output, because an unvalidated
+push would bypass the gate that decides whether a trade may happen at all.
+
+`scripts/push-catalysts.mjs` converts raw EPS rows into graded catalysts:
+surprises at or above 10% are high, 3 to 10% medium, below 3% discarded as
+noise, and misses dropped entirely since a negative surprise drifts the wrong
+way for a long-only book. Seeded with the week of September 8 to 11, twenty-five
+rows produced nineteen catalysts; four misses and two sub-threshold surprises
+were correctly excluded.
+
+`entry_max_catalyst_age_minutes` moved from 1440 to 14400. A 24-hour window
+discarded the entire drift horizon: the effect is strongest across the first two
+to three weeks after the announcement, and positions here hold for five days.
+
+### Threshold set at 70%
+
+Measured against those nineteen catalysts, `entry_min_pct_of_52w_high` produces
+two candidates at 75%, three at 70%, six at 65% and seven at 60%. Set to 70:
+three candidates matches the stated target of two to three trades a week without
+reaching into the band where short-horizon winners revert. Dropping to 65 would
+roughly triple candidates while admitting exactly the names the evidence warns
+about.
+
+Candidates as of the September 11 close: GME at 75% of its 52-week high, SIG at
+91%, SAIL at 72%. Stops of 7.4%, 11.5% and 15.0% against sizes of $3,371, $2,169
+and $1,667 — three different stops and sizes carrying an identical $250 risk,
+which is the volatility normalisation working as intended.
+
+### Session startup
+
+`npm run paper:start` runs the dependent steps in order: worker reachable,
+credentials and model probed through the doctor, profile applied, catalysts
+pushed, agent enabled. A failure stops the sequence rather than continuing,
+because enabling an agent whose profile did not apply, or whose catalyst cache
+is empty under a catalyst-gated strategy, would run the previous configuration
+against nothing. `--no-enable` performs everything except arming.
+
+Saving JSON still does not configure the durable object, and durable-object
+state does not survive the local dev server, so the sequence is re-run each time
+the worker starts.
+
+### Expectation
+
+Three trades a week at a 2R target and a 50% hit rate is roughly 1 to 2% a
+month, not the 2 to 3% requested. Closing that gap requires a sustained hit rate
+above 60%, which nothing here has demonstrated. No position has been opened and
+no forward result exists.
+
 ## Diagnostics and reusable instructions
 
 ```bash

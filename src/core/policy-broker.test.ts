@@ -41,7 +41,18 @@ function setup(pendingExecutions: Record<string, PendingExecution> = {}) {
     onBuyAbandoned,
     maxBuyNotional: () => 1250,
   });
-  return { broker, trading, validateBuy, validateExecution, canSubmit, pendingExecutions, persist, onSell, onBuyIntent, onBuyAbandoned };
+  return {
+    broker,
+    trading,
+    validateBuy,
+    validateExecution,
+    canSubmit,
+    pendingExecutions,
+    persist,
+    onSell,
+    onBuyIntent,
+    onBuyAbandoned,
+  };
 }
 describe("autonomous entry execution checks", () => {
   it("rejects a strategy-disallowed symbol before order submission", async () => {
@@ -212,8 +223,9 @@ describe("persistent execution reconciliation", () => {
     s.trading.getPositions.mockResolvedValue([holding]);
     s.trading.closePosition.mockRejectedValueOnce(new Error("timeout"));
     await s.broker.sell("AAPL", "stop");
-    s.trading.listOrders.mockResolvedValue([{ ...order("sell", "filled", "10"), qty: "10",
-      submitted_at: new Date(Date.now() + 60_000).toISOString() }]);
+    s.trading.listOrders.mockResolvedValue([
+      { ...order("sell", "filled", "10"), qty: "10", submitted_at: new Date(Date.now() + 60_000).toISOString() },
+    ]);
     s.trading.getPositions.mockResolvedValue([]);
     await s.broker.reconcile!();
     expect(s.pendingExecutions.AAPL?.order_id).toBeUndefined();
@@ -222,7 +234,8 @@ describe("persistent execution reconciliation", () => {
 
   it("serializes entries across two adapters sharing persisted state", async () => {
     const state: Record<string, PendingExecution> = {};
-    const a = setup(state), b = setup(state);
+    const a = setup(state),
+      b = setup(state);
     const results = await Promise.all([a.broker.buy("AAPL", 2500, "test"), b.broker.buy("MSFT", 2500, "test")]);
     expect(results.filter(Boolean)).toHaveLength(1);
   });
@@ -237,13 +250,18 @@ describe("final submission boundary", () => {
   });
   it("honors disable while awaiting fresh market data", async () => {
     const s = setup();
-    s.validateExecution.mockImplementation(async () => { s.canSubmit.mockReturnValue(false); return null; });
+    s.validateExecution.mockImplementation(async () => {
+      s.canSubmit.mockReturnValue(false);
+      return null;
+    });
     expect(await s.broker.buy("AAPL", 2500, "test")).toBe(false);
     expect(s.trading.createOrder).not.toHaveBeenCalled();
   });
   it("honors disable while persisting an intent before HTTP", async () => {
     const s = setup();
-    s.persist.mockImplementation(async () => { s.canSubmit.mockReturnValue(false); });
+    s.persist.mockImplementation(async () => {
+      s.canSubmit.mockReturnValue(false);
+    });
     expect(await s.broker.buy("AAPL", 2500, "test")).toBe(false);
     expect(s.trading.createOrder).not.toHaveBeenCalled();
     expect(s.pendingExecutions).toEqual({});
