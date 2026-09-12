@@ -794,6 +794,45 @@ daily range as ordinary noise, and the field is left open for a later review
 pass. Sector attribution needs a symbol-to-sector map the Worker does not have —
 the broker connector supplies one, which is item 7 of the backlog.
 
+## Early exits — September 12, 2026
+
+Closing before the target is the quietest way to destroy expectancy, and the
+system already had an uncontrolled path for it. The analyst's SELL branch
+requires only a confidence above the threshold and thirty minutes held; entries
+require a catalyst, fresh research, eight measured gates and schema validation.
+All the discipline sat on the entry side.
+
+The cost, at a 7.5% ATR-derived stop and a 15.0% target:
+
+| Exit at | R realised | Break-even hit rate |
+|---|---:|---:|
+| Target | 2.00R | 33% |
+| +7% | 0.93R | 52% |
+| +5% | 0.67R | 60% |
+| +3% | 0.40R | 71% |
+| +2% | 0.27R | 79% |
+
+A model closing at +3% converts a 2R system into a 0.40R one.
+
+The answer is not to forbid early exits but to require evidence that the thesis
+is dead rather than merely slow. `exit_on_adverse_news` closes a position when
+issuer-specific adverse news is published **after** the entry — dilution, an
+offering, an investigation, a guidance cut. It is checked before the profit
+target, because a dilutive offering does not become acceptable just because the
+position happens to be green, and only invalidation later than the entry counts:
+anything earlier was already visible to the entry gate.
+
+This reuses the news gatherer's existing per-issuer invalidation record rather
+than keeping a second cache. That record is single-issuer only, survives
+restarts and is already independent of feed ordering, all of which a duplicate
+would have had to re-earn.
+
+Discretionary closes are now attributed to their own cause rather than folded in
+with the rest, carrying the R realised and the target given up. Whether they help
+or hurt is not knowable in advance: it is answerable only by grouping them and
+comparing realised R against trades that ran to a level. Until that comparison
+exists the path is left in place and measured rather than tuned.
+
 ## Diagnostics and reusable instructions
 
 ```bash

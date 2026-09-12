@@ -95,6 +95,15 @@ export const AgentConfigSchema = z
     /** Deterministic time stop, independent of social-history availability. 0 disables. */
     max_hold_days: z.number().min(0).max(60).default(0),
 
+    /**
+     * Exit a held position when disqualifying news appears — dilution, an
+     * offering, an investigation, a guidance cut. The thesis is dead rather
+     * than slow, and that is the only evidence that justifies leaving before
+     * the target. Discretionary early exits on sentiment destroy the R
+     * multiple: taking +3% against a 7.5% stop is 0.40R, which raises the
+     * break-even hit rate from 33% to 71%.
+     */
+    exit_on_adverse_news: z.boolean().default(true),
     stale_position_enabled: z.boolean(),
     stale_min_hold_hours: z.number().min(0).max(168),
     stale_max_hold_days: z.number().min(1).max(30),

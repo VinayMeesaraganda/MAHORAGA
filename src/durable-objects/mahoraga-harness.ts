@@ -62,7 +62,7 @@ import {
   gatherTwitterConfirmation,
   isTwitterEnabled,
 } from "../strategy/default/gatherers/twitter";
-import { bestCatalyst, isDisqualifying } from "../strategy/default/helpers/catalyst";
+import { adverseCatalystReason, bestCatalyst } from "../strategy/default/helpers/catalyst";
 import { isCryptoSymbol, normalizeCryptoSymbol } from "../strategy/default/helpers/crypto";
 import { deriveMarketContext, withTechnicals } from "../strategy/default/helpers/market";
 import { attributeExit, type ExitEvidence } from "../strategy/default/helpers/postmortem";
@@ -1718,7 +1718,7 @@ export class MahoragaHarness extends DurableObject<Env> {
         limit: 30,
       });
       adverseNews = news
-        .filter((n) => isDisqualifying(`${n.headline} ${n.summary}`))
+        .filter((n) => adverseCatalystReason(`${n.headline} ${n.summary}`))
         .map((n) => n.headline)
         .slice(0, 3);
     } catch {
@@ -1728,6 +1728,7 @@ export class MahoragaHarness extends DurableObject<Env> {
     return {
       pnl_pct: marks.pnl_pct,
       stop_pct: stopPct,
+      target_pct: entry?.target_pct ?? null,
       exit_reason: marks.reason,
       market_pct: marketPct,
       // Sector attribution needs a symbol-to-sector map the Worker does not have.

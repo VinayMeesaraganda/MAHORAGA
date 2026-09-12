@@ -27,6 +27,7 @@ export type ExitCause =
   | "macro"
   | "sector"
   | "stop_too_tight"
+  | "discretionary"
   | "time_expired"
   | "unknown";
 
@@ -35,6 +36,8 @@ export interface ExitEvidence {
   pnl_pct: number;
   /** Planned stop distance at entry, in percent. */
   stop_pct: number;
+  /** Planned target at entry, for measuring what an early exit gave up. */
+  target_pct?: number | null;
   /** Whatever the exit rule reported. */
   exit_reason: string;
   /** Benchmark move over the same window, in percent. Null when unavailable. */
@@ -126,7 +129,28 @@ export function attributeExit(e: ExitEvidence): ExitAttribution {
     }
   }
 
-  // 5. Ran out of time without doing anything.
+  // 5. Did a model or plan close it before either level was reached?
+  //
+  //    Recorded as its own cause rather than folded into the others, because
+  //    early exits are the quietest way to destroy expectancy: taking +3%
+  //    against a 7.5% stop is 0.40R, which lifts the break-even hit rate from
+  //    33% to 71%. Whether these help or hurt is answerable only by grouping
+  //    them and comparing realised R against trades that ran to a level.
+  if (/llm recommendation|pre-market plan/i.test(e.exit_reason)) {
+    const r = e.stop_pct > 0 ? e.pnl_pct / e.stop_pct : null;
+    const givenUp =
+      e.target_pct && e.target_pct > 0 ? ` Target was ${pct(e.target_pct)}; this took ${pct(e.pnl_pct)}.` : "";
+    return {
+      cause: "discretionary",
+      explanation:
+        `Closed on judgement rather than a level, at ${pct(e.pnl_pct)}` +
+        (r === null ? "" : ` (${r.toFixed(2)}R)`) +
+        `.${givenUp} Compare realised R for these against trades that ran to a level before trusting the path.`,
+      selection_still_valid: true,
+    };
+  }
+
+  // 6. Ran out of time without doing anything.
   if (/time stop|stale/i.test(e.exit_reason)) {
     return {
       cause: "time_expired",
@@ -135,7 +159,7 @@ export function attributeExit(e: ExitEvidence): ExitAttribution {
     };
   }
 
-  // 6. Nothing external explains it: the catalyst did not produce drift.
+  // 7. Nothing external explains it: the catalyst did not produce drift.
   if (e.pnl_pct < 0) {
     return {
       cause: "thesis",

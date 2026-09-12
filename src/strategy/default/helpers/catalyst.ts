@@ -135,11 +135,6 @@ const UNCONFIRMED =
 
 const QUALITY_RANK: Record<CatalystQuality, number> = { low: 1, medium: 2, high: 3 };
 
-/** True when the text carries language that disqualifies a long regardless of any catalyst. */
-export function isDisqualifying(text: string): boolean {
-  return typeof text === "string" && DISQUALIFYING.test(text);
-}
-
 /** Classify a headline. Returns null when nothing qualifies or the text disqualifies it. */
 export function classifyCatalyst(text: string): CatalystHit | null {
   if (!text || typeof text !== "string") return null;

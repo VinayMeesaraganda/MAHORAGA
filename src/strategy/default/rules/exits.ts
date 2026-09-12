@@ -42,6 +42,28 @@ export function selectExits(ctx: StrategyContext, positions: Position[], _accoun
     const stopPct = posEntry?.stop_pct ?? ctx.config.stop_loss_pct;
     const targetPct = posEntry?.target_pct ?? ctx.config.take_profit_pct;
 
+    // Adverse issuer news is the one evidence-based reason to leave before the
+    // target. Placed ahead of it because a dilutive offering does not become
+    // acceptable just because the position happens to be green.
+    //
+    // Reuses the news gatherer's per-issuer invalidation rather than keeping a
+    // second cache: that record is single-issuer only, survives restarts, and
+    // is already ordering-independent. Only invalidation that happened after
+    // this position was opened counts — news that predates the entry was
+    // already visible to the entry gate.
+    if (ctx.config.exit_on_adverse_news && posEntry) {
+      const invalidatedAt = ctx.state.get<Record<string, number>>("catalystInvalidatedAt") ?? {};
+      const flaggedAt = invalidatedAt[pos.symbol.toUpperCase()] ?? invalidatedAt[pos.symbol];
+      if (Number.isFinite(flaggedAt) && (flaggedAt as number) > posEntry.entry_time) {
+        const ageMins = (Date.now() - (flaggedAt as number)) / 60_000;
+        exits.push({
+          symbol: pos.symbol,
+          reason: `Adverse issuer news ${ageMins.toFixed(0)}m ago invalidated the thesis`,
+        });
+        continue;
+      }
+    }
+
     // Take profit
     if (plPct >= targetPct) {
       exits.push({

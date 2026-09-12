@@ -44,5 +44,6 @@
   "entry_max_catalyst_age_minutes": 14400,
   "entry_min_range_position": 0.5,
   "trailing_arm_r": 1.5,
-  "trailing_stop_r": 1.0
+  "trailing_stop_r": 1.0,
+  "exit_on_adverse_news": true
 }

@@ -80,14 +80,63 @@ describe("attributeExit", () => {
   });
 
   it("says unknown rather than guessing on a flat close with no evidence", () => {
+    // "LLM recommendation" now classifies as discretionary, so this uses a
+    // reason that genuinely carries no signal about why the position closed.
     const a = attributeExit({
       ...base,
       pnl_pct: 0,
-      exit_reason: "LLM recommendation",
+      exit_reason: "manual close",
       market_pct: null,
       sector_pct: null,
       atr_pct_at_entry: null,
     });
     expect(a.cause).toBe("unknown");
+  });
+});
+
+describe("discretionary exits", () => {
+  const early: ExitEvidence = {
+    pnl_pct: 3.0,
+    stop_pct: 7.5,
+    target_pct: 15.0,
+    exit_reason: "LLM recommendation: sentiment deteriorating",
+    market_pct: 0.4,
+    sector_pct: 0.2,
+    adverse_news: [],
+    recovered_to_pct: null,
+    atr_pct_at_entry: 3.0,
+  };
+
+  it("records a judgement-based close as its own cause, with the R it realised", () => {
+    // The quietest way to destroy expectancy: +3% on a 7.5% stop is 0.40R, and
+    // the break-even hit rate goes from 33% to 71%.
+    const a = attributeExit(early);
+    expect(a.cause).toBe("discretionary");
+    expect(a.explanation).toContain("0.40R");
+    expect(a.explanation).toContain("Target was +15.0%");
+  });
+
+  it("covers the premarket plan path too", () => {
+    expect(attributeExit({ ...early, exit_reason: "Pre-market plan: rotating out" }).cause).toBe("discretionary");
+  });
+
+  it("does not claim a selection failure — the entry may have been fine", () => {
+    expect(attributeExit(early).selection_still_valid).toBe(true);
+  });
+
+  it("still lets genuine adverse news take precedence over judgement", () => {
+    const a = attributeExit({ ...early, pnl_pct: -2, adverse_news: ["Acme announces dilutive secondary offering"] });
+    expect(a.cause).toBe("company_event");
+  });
+
+  it("attributes an adverse-news exit to the company, not the thesis", () => {
+    const a = attributeExit({
+      ...early,
+      pnl_pct: -4.1,
+      exit_reason: "Adverse issuer news 12m ago invalidated the thesis",
+      adverse_news: ["Guidance cut for the full year"],
+    });
+    expect(a.cause).toBe("company_event");
+    expect(a.selection_still_valid).toBe(true);
   });
 });
