@@ -1200,3 +1200,49 @@ session. Filed as backlog item 12.
 **No change to the gate or to `target_r_multiple`.** Both were tempting and both
 would have been parameters fitted on one in-sample backtest of ten surviving
 names — the precise failure `experiments.md` exists to prevent.
+
+## Blow-up archetypes, audited against the code
+
+Three community post-mortems were offered — revenge sizing after a loss,
+refusing a stop and averaging down, and forcing trades to finish green — plus
+three options-specific ones. Most map to impulses a scheduled process cannot
+have. Two mapped to real code.
+
+Immune by construction: size is `equity * risk_per_trade_pct`, so it *falls*
+after a loss rather than rising — the arithmetic is anti-martingale, and the
+revenge spiral is unavailable. Averaging down is impossible because
+`selectEntries` filters on `!heldSymbols.has(symbol)`, so a held name cannot be
+bought again at any price. Gate thresholds are static, so there is no mechanism
+by which a flat week loosens standards to force a green day.
+
+Working, and worth recording because it looked broken: `recordDailyLoss` and
+`setCooldown` have zero callers, so `risk_state.daily_loss_usd` is permanently
+zero. The daily loss limit survives that, because `engine.ts` takes
+`Math.max(equityLossPct, daily_loss_usd / equity)` and the first term is
+computed from broker equity including unrealized P&L. The 2% kill switch is
+live. The `loss_cooldown` rule is not: the check and its tests exist, nothing
+ever sets `cooldown_until`. A fully-tested lock with no key.
+
+No automatic cooldown trigger was added. After a 1R loss at 1% risk, stopping
+would be an overreaction to an outcome the strategy expects — the first
+post-mortem's own lesson is that a loss is a business expense. The 2% daily
+limit already covers the catastrophic case, and a trigger tuned by guesswork
+would most likely stop a system whose actual problem is that it has never
+traded.
+
+The real hole was options. `executeOptionsOrder` called
+`alpaca.trading.createOrder` directly and never reached `PolicyEngine`, skipping
+all fourteen options rules — `options_min_dte`, which refuses 0DTE;
+`options_max_position_size`; `options_total_exposure`; `options_max_positions`;
+`options_no_averaging_down` — plus the kill switch, cooldown and daily loss
+limit. The rules against the exact failures in those post-mortems were written,
+tested, and routed around. This is the second instance of the class:
+`policy-broker.ts` records fixing the same bug for equities.
+
+It now fails closed and logs `blocked_policy_bypass`. The order-placing body was
+deleted rather than left unreachable, since whoever routes it properly will call
+`executeWithPolicy` and unreachable order code invites deleting the guard
+instead. `src/core/order-path.test.ts` locks the invariant: the harness must
+contain no direct broker call, and every MCP order path must have a matching
+`PolicyEngine` evaluation and approval token. The MCP paths were checked and are
+correctly gated — preview, evaluate, mint, validate, place.

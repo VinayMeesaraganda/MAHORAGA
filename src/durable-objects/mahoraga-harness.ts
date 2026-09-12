@@ -1097,47 +1097,36 @@ export class MahoragaHarness extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Options entry — refused until it is routed through the policy broker.
+   *
+   * This path called `alpaca.trading.createOrder` directly, so it never reached
+   * PolicyEngine and skipped every rule the engine defines for options:
+   * `options_min_dte` (the rule that refuses 0DTE), `options_max_dte`, delta
+   * bounds, `options_max_position_size`, `options_total_exposure`,
+   * `options_max_positions` and `options_no_averaging_down` — plus the
+   * account-wide `kill_switch`, `loss_cooldown` and `daily_loss_limit` that gate
+   * every equity order.
+   *
+   * Rules that are written but routed around are more dangerous than rules that
+   * were never written, because the configuration reads as protection while the
+   * order path ignores it. The order-placing body is deleted rather than left
+   * unreachable: whoever does the routing work will call `executeWithPolicy`,
+   * not revive this, and unreachable order code invites someone to simply drop
+   * the guard. Git history holds the original.
+   */
   private async executeOptionsOrder(
     contract: { symbol: string; mid_price: number },
-    quantity: number,
-    equity: number
+    _quantity: number,
+    _equity: number
   ): Promise<boolean> {
     if (!this.state.config.options_enabled) return false;
 
-    const totalCost = contract.mid_price * quantity * 100;
-    const maxAllowed = equity * this.state.config.options_max_pct_per_trade;
-    let qty = quantity;
-
-    if (totalCost > maxAllowed) {
-      qty = Math.floor(maxAllowed / (contract.mid_price * 100));
-      if (qty < 1) {
-        this.log("Options", "skipped_size", { contract: contract.symbol, cost: totalCost, max: maxAllowed });
-        return false;
-      }
-    }
-
-    try {
-      const alpaca = createAlpacaProviders(this.env);
-      const order = await alpaca.trading.createOrder({
-        symbol: contract.symbol,
-        qty,
-        side: "buy",
-        type: "limit",
-        limit_price: Math.round(contract.mid_price * 100) / 100,
-        time_in_force: "day",
-      });
-
-      this.log("Options", "options_buy_executed", {
-        contract: contract.symbol,
-        qty,
-        status: order.status,
-        estimated_cost: (contract.mid_price * qty * 100).toFixed(2),
-      });
-      return true;
-    } catch (error) {
-      this.log("Options", "options_buy_failed", { contract: contract.symbol, error: String(error) });
-      return false;
-    }
+    this.log("Options", "blocked_policy_bypass", {
+      contract: contract.symbol,
+      reason: "options execution bypasses PolicyEngine; route through the policy broker before enabling",
+    });
+    return false;
   }
 
   // ============================================================================
