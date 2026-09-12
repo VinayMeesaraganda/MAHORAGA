@@ -62,9 +62,10 @@ import {
   gatherTwitterConfirmation,
   isTwitterEnabled,
 } from "../strategy/default/gatherers/twitter";
-import { bestCatalyst } from "../strategy/default/helpers/catalyst";
+import { bestCatalyst, isDisqualifying } from "../strategy/default/helpers/catalyst";
 import { isCryptoSymbol, normalizeCryptoSymbol } from "../strategy/default/helpers/crypto";
 import { deriveMarketContext, withTechnicals } from "../strategy/default/helpers/market";
+import { attributeExit, type ExitEvidence } from "../strategy/default/helpers/postmortem";
 import { buildThesis, classifyOutcome, regimeTags, rMultiple } from "../strategy/default/helpers/thesis";
 import { tickerCache } from "../strategy/default/helpers/ticker";
 import { runCryptoTrading } from "../strategy/default/rules/crypto-trading";
@@ -230,6 +231,7 @@ export class MahoragaHarness extends DurableObject<Env> {
           peak_price: 0,
           peak_sentiment: sentiment,
           ...self.sizedTradeFor(symbol, account.equity),
+          atr_pct: self.state.signalResearch?.[symbol]?.market?.atr_pct ?? undefined,
         };
         void self.journalEntry(symbol, account.equity);
       },
@@ -1676,6 +1678,66 @@ export class MahoragaHarness extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Collect what is needed to attribute an exit.
+   *
+   * Each lookup is independent and failure-tolerant: an attribution made on
+   * partial evidence is still worth more than none, and the attributor reports
+   * "unknown" rather than guessing when a field is missing. Recovery after the
+   * exit is deliberately absent — it is a future measurement.
+   */
+  private async gatherExitEvidence(
+    symbol: string,
+    marks: { pnl_pct: number; reason: string },
+    stopPct: number
+  ): Promise<ExitEvidence> {
+    const entry = this.state.positionEntries?.[symbol];
+    const entryTime = entry?.entry_time ?? Date.now();
+    const alpaca = createAlpacaProviders(this.env);
+
+    // What the tape did over the same window, so beta is not mistaken for a bad pick.
+    let marketPct: number | null = null;
+    try {
+      const start = new Date(entryTime - 86_400_000).toISOString().slice(0, 10);
+      const spy = await alpaca.marketData.getBars("SPY", "1Day", { limit: 30, start });
+      if (spy.length >= 2) {
+        const first = spy[0]?.c;
+        const last = spy[spy.length - 1]?.c;
+        if (first && last && first > 0) marketPct = ((last - first) / first) * 100;
+      }
+    } catch {
+      // Leave null; the attributor handles missing evidence.
+    }
+
+    // Did the facts change after we bought it?
+    let adverseNews: string[] = [];
+    try {
+      const news = await alpaca.marketData.getNews({
+        symbols: [symbol],
+        start: new Date(entryTime).toISOString(),
+        limit: 30,
+      });
+      adverseNews = news
+        .filter((n) => isDisqualifying(`${n.headline} ${n.summary}`))
+        .map((n) => n.headline)
+        .slice(0, 3);
+    } catch {
+      // Leave empty.
+    }
+
+    return {
+      pnl_pct: marks.pnl_pct,
+      stop_pct: stopPct,
+      exit_reason: marks.reason,
+      market_pct: marketPct,
+      // Sector attribution needs a symbol-to-sector map the Worker does not have.
+      sector_pct: null,
+      adverse_news: adverseNews,
+      recovered_to_pct: null,
+      atr_pct_at_entry: entry?.atr_pct ?? null,
+    };
+  }
+
   /** Close the journal entry with the outcome, in R so trades with different stops compare. */
   private async journalExit(symbol: string): Promise<void> {
     const db = createD1Client(this.env.DB);
@@ -1683,17 +1745,33 @@ export class MahoragaHarness extends DurableObject<Env> {
     delete this.pendingExitMarks[symbol];
     if (!db || !marks) return;
     try {
-      const stopPct = this.state.positionEntries?.[symbol]?.stop_pct ?? this.state.config.stop_loss_pct;
+      const entry = this.state.positionEntries?.[symbol];
+      const stopPct = entry?.stop_pct ?? this.state.config.stop_loss_pct;
       const r = rMultiple(marks.pnl_pct, stopPct);
+      const evidence = await this.gatherExitEvidence(symbol, marks, stopPct);
+      const attribution = attributeExit(evidence);
+
       await closeJournalEntry(db, {
         symbol,
         exit_price: marks.price,
         pnl_usd: marks.pnl_usd,
         pnl_pct: marks.pnl_pct,
         outcome: classifyOutcome(marks.pnl_pct),
-        lessons_learned: `${marks.reason} | ${r === null ? "R unknown" : `${r.toFixed(2)}R`} on a ${stopPct.toFixed(1)}% stop | P&L marked at decision, not fill`,
+        lessons_learned: [
+          `cause=${attribution.cause}`,
+          `selection_valid=${attribution.selection_still_valid}`,
+          attribution.explanation,
+          `${marks.reason} | ${r === null ? "R unknown" : `${r.toFixed(2)}R`} on a ${stopPct.toFixed(1)}% stop`,
+          "P&L marked at decision, not fill",
+        ].join(" | "),
       });
-      this.log("Journal", "exit_recorded", { symbol, pnl_pct: marks.pnl_pct.toFixed(2), r: r?.toFixed(2) });
+      this.log("Journal", "exit_recorded", {
+        symbol,
+        pnl_pct: marks.pnl_pct.toFixed(2),
+        r: r?.toFixed(2),
+        cause: attribution.cause,
+        selection_valid: attribution.selection_still_valid,
+      });
     } catch (error) {
       this.log("Journal", "exit_failed", { symbol, error: String(error) });
     }

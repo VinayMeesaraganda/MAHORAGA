@@ -756,6 +756,44 @@ beats, is the 52-week gate at 70% selecting better trades than 75% would have,
 do entries in leading sectors outperform, and is model confidence correlated
 with outcome at all. None of these can be answered yet — nothing has traded.
 
+## Exit attribution — September 12, 2026
+
+A journal that records only outcomes says a trade lost money, which is not a
+lesson. `helpers/postmortem.ts` attributes each exit to a cause, because each
+answer implies a different fix:
+
+| Cause | Meaning | What to change |
+|---|---|---|
+| `target_hit` | Reached the profit target | Nothing |
+| `company_event` | Adverse news arrived after entry | Nothing — selection was sound on the information available |
+| `macro` | The tape fell and the name tracked it | Nothing about selection |
+| `sector` | The sector fell while the tape held | Add a sector filter |
+| `stop_too_tight` | Stopped by a move inside normal daily range | Risk settings, not selection |
+| `time_expired` | Closed on time having done nothing | Selection |
+| `thesis` | Lost with no external explanation | Selection |
+
+The distinction that matters most is between the middle rows and the last two. A
+thesis that was right but stopped out by noise, or drowned by a market-wide
+selloff, is evidence *for* the selection process and against the risk settings.
+Recording those as thesis failures is how a working edge gets tuned away.
+
+Each attribution carries `selection_still_valid`, and the journal reader
+separates losing trades on it: tune selection on one group, risk settings on the
+other.
+
+Evidence gathered at exit: the position's move, SPY over the same holding window
+so beta is not mistaken for a bad pick, disqualifying headlines published since
+entry, and the ATR recorded at entry. Each lookup is independent and
+failure-tolerant, and the attributor reports `unknown` rather than guessing when
+a field is missing.
+
+Two limits are structural. Recovery after the exit is the cleanest evidence that
+a stop was too tight, but it is a future measurement and cannot be known when
+the trade closes; the ATR test stands in, treating an adverse move under 1.5x
+daily range as ordinary noise, and the field is left open for a later review
+pass. Sector attribution needs a symbol-to-sector map the Worker does not have —
+the broker connector supplies one, which is item 7 of the backlog.
+
 ## Diagnostics and reusable instructions
 
 ```bash

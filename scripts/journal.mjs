@@ -63,10 +63,32 @@ if (closed.length) {
     const t = parse(e.signals_json)?.catalyst?.type ?? "none";
     (byCatalyst[t] ??= []).push(Number(e.pnl_usd ?? 0));
   }
-  console.log("\nby catalyst type:");
+  console.log("\nby catalyst type — which reasons actually pay:");
   for (const [t, pnls] of Object.entries(byCatalyst).sort((a, b) => b[1].length - a[1].length)) {
     const net = pnls.reduce((s, n) => s + n, 0);
     const w = pnls.filter((n) => n > 0).length;
     console.log(`  ${t.padEnd(14)} ${String(pnls.length).padStart(3)} trades · ${w} won · net $${net.toFixed(0)}`);
+  }
+
+  // Attribution is the half that says what to change. A loss caused by the tape
+  // or by too tight a stop is evidence about risk settings, not about selection.
+  const field = (e, k) => (e.lessons_learned ?? "").match(new RegExp(`${k}=([a-z_]+)`))?.[1];
+  const byCause = {};
+  for (const e of closed) (byCause[field(e, "cause") ?? "unrecorded"] ??= []).push(Number(e.pnl_usd ?? 0));
+  console.log("\nby cause — why theses did not play out:");
+  for (const [c, pnls] of Object.entries(byCause).sort((a, b) => b[1].length - a[1].length)) {
+    const net = pnls.reduce((s, n) => s + n, 0);
+    console.log(`  ${c.padEnd(16)} ${String(pnls.length).padStart(3)} trades · net $${net.toFixed(0)}`);
+  }
+
+  const losses = closed.filter((e) => Number(e.pnl_usd ?? 0) < 0);
+  if (losses.length) {
+    const selectionFailures = losses.filter((e) => field(e, "selection_valid") === "false");
+    console.log(
+      `\nof ${losses.length} losing trade(s), ${selectionFailures.length} were selection failures ` +
+        `and ${losses.length - selectionFailures.length} were caused by the tape, the sector, ` +
+        `a post-entry event, or too tight a stop.`
+    );
+    console.log("Tune selection on the first group; tune risk settings on the second.");
   }
 }

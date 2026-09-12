@@ -1,25 +1,54 @@
 import { describe, expect, it } from "vitest";
 import type { MarketContext, ResearchResult } from "../../../core/types";
-import { buildThesis, classifyOutcome, regimeTags, rMultiple } from "./thesis";
 import type { MacroRegime } from "./macro";
+import { buildThesis, classifyOutcome, regimeTags, rMultiple } from "./thesis";
 
 const market: MarketContext = {
-  price: 21.16, prev_close: 20.8, gap_pct: 0.9, extension_pct: 1.7, range_position: 0.61,
-  rel_volume: 2.4, dollar_volume: 135_000_000, spread_bps: 6,
-  atr_pct: 2.97, rsi_14: 70, sma_20: 20.1, sma_50: 19.4, trend: "above both", pct_of_52w_high: 75,
+  price: 21.16,
+  prev_close: 20.8,
+  gap_pct: 0.9,
+  extension_pct: 1.7,
+  range_position: 0.61,
+  rel_volume: 2.4,
+  dollar_volume: 135_000_000,
+  spread_bps: 6,
+  atr_pct: 2.97,
+  rsi_14: 70,
+  sma_20: 20.1,
+  sma_50: 19.4,
+  trend: "above both",
+  pct_of_52w_high: 75,
 };
 const research: ResearchResult = {
-  symbol: "GME", verdict: "BUY", confidence: 0.78, entry_quality: "good",
-  reasoning: "Earnings beat with volume confirmation.", red_flags: [], catalysts: ["EPS surprise"],
-  timestamp: Date.now(), market,
+  symbol: "GME",
+  verdict: "BUY",
+  confidence: 0.78,
+  entry_quality: "good",
+  reasoning: "Earnings beat with volume confirmation.",
+  red_flags: [],
+  catalysts: ["EPS surprise"],
+  timestamp: Date.now(),
+  market,
 };
 const regime = {
-  as_of: Date.now(), risk: "risk-on", yields: "flat",
-  oil_pct: -2.19, gold_pct: 0.57, dollar_pct: 0.11, volatility_pct: -4.6,
-  spy_pct: 0.84, qqq_pct: 0.88, iwm_pct: 0.47,
-  leaders: [{ symbol: "XLK", name: "Technology", change_pct: 1.31 }, { symbol: "XLI", name: "Industrials", change_pct: 1.08 }],
+  as_of: Date.now(),
+  risk: "risk-on",
+  yields: "flat",
+  oil_pct: -2.19,
+  gold_pct: 0.57,
+  dollar_pct: 0.11,
+  volatility_pct: -4.6,
+  spy_pct: 0.84,
+  qqq_pct: 0.88,
+  iwm_pct: 0.47,
+  leaders: [
+    { symbol: "XLK", name: "Technology", change_pct: 1.31 },
+    { symbol: "XLI", name: "Industrials", change_pct: 1.08 },
+  ],
   laggards: [{ symbol: "XLU", name: "Utilities", change_pct: -0.35 }],
-  breadth_pct: 0.05, credit_pct: 0.05, size_pct: -0.36,
+  breadth_pct: 0.05,
+  credit_pct: 0.05,
+  size_pct: -0.36,
 } as MacroRegime;
 
 describe("rMultiple", () => {
@@ -46,10 +75,25 @@ describe("classifyOutcome", () => {
 });
 
 describe("buildThesis", () => {
-  const catalyst = { type: "earnings" as const, quality: "high" as const, matched: "tops estimates", headline: "Q2 EPS 0.27 vs 0.06 estimate", at: Date.now() - 36 * 3600_000 };
+  const catalyst = {
+    type: "earnings" as const,
+    quality: "high" as const,
+    matched: "tops estimates",
+    headline: "Q2 EPS 0.27 vs 0.06 estimate",
+    at: Date.now() - 36 * 3600_000,
+  };
 
   it("captures the reason, the measurements and the plan", () => {
-    const t = buildThesis({ symbol: "GME", catalyst, research, market, regime, stopPct: 7.4, targetPct: 14.8, notional: 3371 });
+    const t = buildThesis({
+      symbol: "GME",
+      catalyst,
+      research,
+      market,
+      regime,
+      stopPct: 7.4,
+      targetPct: 14.8,
+      notional: 3371,
+    });
     expect(t.summary).toContain("GME");
     expect(t.summary).toContain("earnings (high)");
     expect(t.summary).toContain("75% of 52w high");
@@ -63,7 +107,16 @@ describe("buildThesis", () => {
   });
 
   it("records absence explicitly instead of omitting it", () => {
-    const t = buildThesis({ symbol: "XYZ", catalyst: null, research: undefined, market: null, regime: null, stopPct: 5, targetPct: 10, notional: 1000 });
+    const t = buildThesis({
+      symbol: "XYZ",
+      catalyst: null,
+      research: undefined,
+      market: null,
+      regime: null,
+      stopPct: 5,
+      targetPct: 10,
+      notional: 1000,
+    });
     expect(t.catalyst).toBeNull();
     expect(t.research).toBeNull();
     expect(t.summary).toContain("no catalyst recorded");

@@ -88,7 +88,15 @@ computed. The broker connector supplies `sector` and `industry` per symbol;
 Alpaca does not. Would also enable a correlation cap — five positions in one
 sector is one bet, not five.
 
-## 8. Earnings catalysts still arrive by hand
+## 8. Post-exit review pass
+
+Exit attribution runs when the trade closes, so it cannot see whether the name
+recovered afterwards — the cleanest evidence that a stop was too tight rather
+than a thesis being wrong. The ATR test stands in for now. A pass that revisits
+closed entries a few days later and fills `recovered_to_pct` would separate
+"stopped by noise" from "genuinely wrong" far more reliably than the proxy does.
+
+## 9. Earnings catalysts still arrive by hand
 
 `config/catalysts.json` is populated manually from the broker earnings calendar
 and pushed with `npm run paper:catalysts`. The connector is available to a

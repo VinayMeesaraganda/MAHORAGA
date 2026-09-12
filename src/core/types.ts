@@ -68,6 +68,8 @@ export interface PositionEntry {
   /** Levels fixed at entry from that name's volatility; config values are the fallback. */
   stop_pct?: number;
   target_pct?: number;
+  /** Daily ATR at entry, so an exit can ask whether the adverse move was ordinary. */
+  atr_pct?: number;
 }
 
 // ---------------------------------------------------------------------------
