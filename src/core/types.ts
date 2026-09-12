@@ -212,6 +212,10 @@ export interface AgentState {
   recentExits: Record<string, number>;
   /** Aggregated journal record, injected into prompts as evidence. Shape in helpers/learnings. */
   learnings: unknown;
+  /** Rolling Form 4 open-market purchases; clusters form across filings and days. */
+  insiderTransactions: unknown[];
+  /** Accession index URLs already fetched, so filings are not re-downloaded. */
+  processedForm4: Record<string, number>;
   twitterConfirmations: Record<string, TwitterConfirmation>;
   twitterDailyReads: number;
   twitterDailyReadReset: number;

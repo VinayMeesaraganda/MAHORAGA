@@ -10,6 +10,7 @@
 export type CatalystType =
   | "guidance"
   | "regulatory"
+  | "insider"
   | "earnings"
   | "contract"
   | "m_and_a"

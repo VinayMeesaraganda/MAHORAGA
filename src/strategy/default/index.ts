@@ -17,6 +17,7 @@ import type { ResearchResult } from "../../core/types";
 import type { Strategy } from "../types";
 import { DEFAULT_CONFIG } from "./config";
 import { cryptoGatherer } from "./gatherers/crypto";
+import { insiderGatherer } from "./gatherers/insider";
 import { macroGatherer } from "./gatherers/macro";
 import { mostActivesGatherer } from "./gatherers/most-actives";
 import { newsGatherer } from "./gatherers/news";
@@ -41,6 +42,7 @@ export const defaultStrategy: Strategy = {
     newsGatherer,
     mostActivesGatherer,
     macroGatherer,
+    insiderGatherer,
     cryptoGatherer,
     secGatherer,
   ],

@@ -938,6 +938,56 @@ The aggregate is recomputed when a trade closes, which is the only event that
 changes it, and on enable so a restart does not lose the record before the first
 decision. `GET /agent/learnings` returns it.
 
+## Insider purchase clusters — September 12, 2026
+
+`sec_4` carried a source weight and `gatherers/sec.ts` already branched on Form
+4, but the request only ever asked for 8-K, so insider filings were configured
+and never fetched. The fourth case this session of machinery built and left
+unwired, after the ATR library, the realised-loss counter and the journal.
+
+The evidence is asymmetric and the asymmetries are the signal:
+
+- **Purchases predict; sales do not.** Insiders sell for diversification, taxes
+  and liquidity, and buy for one reason. Treating them symmetrically adds noise
+  on one side and discards signal on the other, so only purchases are collected.
+- **Only transaction code `P` counts.** `M` (option exercise) and `A` (grant)
+  are compensation rather than conviction and dominate Form 4 volume. A feed
+  that does not separate them is largely reporting payroll.
+- **Clusters beat singles.** Several distinct people buying inside a window is
+  materially stronger than one and far harder to explain away.
+- **Role matters.** A chief executive or finance officer outranks a director.
+
+Grading follows: two or more insiders including an officer is high, two or more
+people or one senior officer is medium, a lone director is low and not
+published. A $50,000 floor on committed dollars separates conviction from a
+gesture. Counting is per person rather than per filing — one insider filing
+three times in a day is one buyer, and counting filings would manufacture
+clusters out of paperwork.
+
+Output is a catalyst rather than a sentiment score, so the entry gate treats it
+identically to an earnings surprise or a guidance raise.
+
+### A defect the live run exposed
+
+SEC publishes one index page per party to a filing: the reporting owner and the
+issuer each receive a distinct URL for the same document. Deduplicating on the
+URL therefore counted a single purchase two or three times. On the first live
+pass that turned forty feed entries into forty filings rather than twenty, five
+purchases into eleven, and inflated one issuer's committed total from $33,652 to
+$100,955 — enough to lift it over the conviction floor and publish a catalyst
+that should not have existed. Deduplication now keys on the accession number,
+which is the filing's actual identity. The inflated figure fed directly into the
+grade, so this was a correctness defect in the signal rather than a tidiness
+one.
+
+Fetching costs two requests per filing, so accession numbers already seen are
+remembered and at most eight new filings are fetched per pass, with a declared
+User-Agent and spacing well inside SEC's ten-per-second guidance.
+
+The comparison was registered in `config/hypotheses.json` before the source
+produced a single trade: do insider clusters beat earnings beats, falsified if
+they do not, twenty-five per group.
+
 ## Diagnostics and reusable instructions
 
 ```bash

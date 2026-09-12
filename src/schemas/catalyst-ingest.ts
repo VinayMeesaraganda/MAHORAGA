@@ -18,6 +18,7 @@ export const IngestedCatalystSchema = z.object({
   type: z.enum([
     "guidance",
     "regulatory",
+    "insider",
     "earnings",
     "contract",
     "m_and_a",
