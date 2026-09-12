@@ -1,6 +1,6 @@
 {
   "_purpose": "Questions registered BEFORE the data exists. Pre-registration is the whole point: deciding what counts as an answer after seeing results is how noise becomes a conclusion.",
-  "_method": "Two-sample comparison of mean R, power 0.8 at alpha 0.05, so n per group is about 16/d^2. Effect sizes are the smallest difference worth acting on, not the one hoped for.",
+  "_method": "Two-sample comparison of mean R, power 0.8 at alpha 0.05, so n per group is about 16/d^2 where d is STANDARDISED: the mean difference divided by the standard deviation of R, not a raw R difference. The counts below assume sigma = 1.0R. Measured sigma on simulated exits over 4,090 entries is 0.69R, but that distribution is truncated by a hard -1R stop and a 2R cap and so understates the tail of real fills; 1.0R is the conservative working value. If the live record shows sigma materially above 1.0R every count below rises as the square: at sigma 2.0R, the 0.5R questions need 256 per group, not 64. Re-derive these from measured sigma once 30 closed trades exist, and record the date when you do.",
   "operational": [
     {
       "id": "loop-runs",
