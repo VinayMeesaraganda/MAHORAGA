@@ -54,6 +54,7 @@ import {
   SignalResearchResponseSchema,
 } from "../schemas/llm-responses";
 import { createD1Client } from "../storage/d1/client";
+import { closeJournalEntry, createJournalEntry, recentJournalEntries } from "../storage/d1/queries/memory";
 import { activeStrategy } from "../strategy";
 import { DEFAULT_STATE } from "../strategy/default/config";
 import {
@@ -61,8 +62,10 @@ import {
   gatherTwitterConfirmation,
   isTwitterEnabled,
 } from "../strategy/default/gatherers/twitter";
+import { bestCatalyst } from "../strategy/default/helpers/catalyst";
 import { isCryptoSymbol, normalizeCryptoSymbol } from "../strategy/default/helpers/crypto";
 import { deriveMarketContext, withTechnicals } from "../strategy/default/helpers/market";
+import { buildThesis, classifyOutcome, regimeTags, rMultiple } from "../strategy/default/helpers/thesis";
 import { tickerCache } from "../strategy/default/helpers/ticker";
 import { runCryptoTrading } from "../strategy/default/rules/crypto-trading";
 import { entryRejection, volatilitySizedTrade } from "../strategy/default/rules/entry-quality";
@@ -228,6 +231,7 @@ export class MahoragaHarness extends DurableObject<Env> {
           peak_sentiment: sentiment,
           ...self.sizedTradeFor(symbol, account.equity),
         };
+        void self.journalEntry(symbol, account.equity);
       },
       onBuyAbandoned: (symbol) => {
         delete self.state.positionEntries[symbol];
@@ -240,6 +244,7 @@ export class MahoragaHarness extends DurableObject<Env> {
         // window when a stop fills, so record the exit and let the entry gate
         // enforce a cooldown instead of re-buying the same name minutes later.
         self.recordExit(symbol);
+        void self.journalExit(symbol);
       },
     });
 
@@ -329,6 +334,18 @@ export class MahoragaHarness extends DurableObject<Env> {
         );
         for (const exit of exits) {
           if (!this.state.enabled) break;
+          // Capture the marks before submitting: once the fill is confirmed the
+          // position no longer exists and its P&L cannot be recovered.
+          const held = positions.find((p) => p.symbol === exit.symbol);
+          const basis = held ? held.market_value - held.unrealized_pl : 0;
+          if (held && basis > 0) {
+            this.pendingExitMarks[exit.symbol] = {
+              price: held.current_price,
+              pnl_usd: held.unrealized_pl,
+              pnl_pct: (held.unrealized_pl / basis) * 100,
+              reason: exit.reason,
+            };
+          }
           await ctx.broker.sell(exit.symbol, exit.reason);
         }
       }
@@ -1290,6 +1307,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       "history",
       "setup/status",
       "catalysts",
+      "journal",
     ];
     if (protectedActions.includes(action)) {
       if (!this.isAuthorized(request)) return this.unauthorizedResponse();
@@ -1299,6 +1317,8 @@ export class MahoragaHarness extends DurableObject<Env> {
       switch (action) {
         case "catalysts":
           return this.handleCatalysts(request);
+        case "journal":
+          return this.handleJournal(url);
         case "status":
           return this.handleStatus();
         case "setup/status":
@@ -1595,6 +1615,88 @@ export class MahoragaHarness extends DurableObject<Env> {
   private sizedTradeFor(symbol: string, equity: number) {
     const atrPct = this.state.signalResearch?.[symbol]?.market?.atr_pct ?? null;
     return volatilitySizedTrade(equity, this.state.config, atrPct);
+  }
+
+  /** Read the trade journal. The record of why, not just what. */
+  private async handleJournal(url: URL): Promise<Response> {
+    const db = createD1Client(this.env.DB);
+    if (!db) return this.jsonResponse({ ok: false, error: "No database bound" });
+    const limit = Math.min(200, Math.max(1, Number.parseInt(url.searchParams.get("limit") ?? "50", 10) || 50));
+    try {
+      return this.jsonResponse({ ok: true, entries: await recentJournalEntries(db, limit) });
+    } catch (error) {
+      return this.jsonResponse({ ok: false, error: String(error) });
+    }
+  }
+
+  /** Exit marks captured at decision time, keyed by symbol, consumed on fill confirmation. */
+  private pendingExitMarks: Record<string, { price: number; pnl_usd: number; pnl_pct: number; reason: string }> = {};
+
+  /**
+   * Journal why a trade was taken, at the moment it was taken.
+   *
+   * None of this survives to the exit: research expires from the cache, the
+   * macro regime moves, the catalyst ages out. A journal written at exit can
+   * only record outcomes, which teaches nothing about selection.
+   */
+  private async journalEntry(symbol: string, equity: number): Promise<void> {
+    const db = createD1Client(this.env.DB);
+    if (!db) return;
+    try {
+      const research = this.state.signalResearch?.[symbol];
+      const catalysts = (this.state.catalystCache ?? {})[symbol.toUpperCase()] ?? [];
+      const catalyst = bestCatalyst(catalysts as never) as never;
+      const sized = this.sizedTradeFor(symbol, equity);
+      const regime = this.state.macroRegime as never;
+      const thesis = buildThesis({
+        symbol,
+        catalyst,
+        research,
+        market: research?.market,
+        regime,
+        stopPct: sized.stop_pct,
+        targetPct: sized.target_pct,
+        notional: sized.notional,
+      });
+
+      await createJournalEntry(db, {
+        symbol,
+        side: "buy",
+        qty: 0,
+        entry_at: new Date().toISOString(),
+        signals: { catalyst: thesis.catalyst, research: thesis.research, plan: thesis.plan },
+        technicals: thesis.gates,
+        regime_tags: regimeTags(regime),
+        notes: thesis.summary,
+      });
+      this.log("Journal", "entry_recorded", { symbol, thesis: thesis.summary.slice(0, 120) });
+    } catch (error) {
+      // Journalling must never block or fail a trade.
+      this.log("Journal", "entry_failed", { symbol, error: String(error) });
+    }
+  }
+
+  /** Close the journal entry with the outcome, in R so trades with different stops compare. */
+  private async journalExit(symbol: string): Promise<void> {
+    const db = createD1Client(this.env.DB);
+    const marks = this.pendingExitMarks[symbol];
+    delete this.pendingExitMarks[symbol];
+    if (!db || !marks) return;
+    try {
+      const stopPct = this.state.positionEntries?.[symbol]?.stop_pct ?? this.state.config.stop_loss_pct;
+      const r = rMultiple(marks.pnl_pct, stopPct);
+      await closeJournalEntry(db, {
+        symbol,
+        exit_price: marks.price,
+        pnl_usd: marks.pnl_usd,
+        pnl_pct: marks.pnl_pct,
+        outcome: classifyOutcome(marks.pnl_pct),
+        lessons_learned: `${marks.reason} | ${r === null ? "R unknown" : `${r.toFixed(2)}R`} on a ${stopPct.toFixed(1)}% stop | P&L marked at decision, not fill`,
+      });
+      this.log("Journal", "exit_recorded", { symbol, pnl_pct: marks.pnl_pct.toFixed(2), r: r?.toFixed(2) });
+    } catch (error) {
+      this.log("Journal", "exit_failed", { symbol, error: String(error) });
+    }
   }
 
   /** Record an exit for the re-entry cooldown, pruning entries past the window. */

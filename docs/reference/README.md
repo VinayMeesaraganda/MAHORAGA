@@ -11,6 +11,7 @@ Latest: [runtime improvements, diagnostics and operating rules](runtime-improvem
 3. [Competition](competition.md): registration, score calculation, paused syncing, service costs.
 4. [Experiment plan](experiments.md): establish a baseline and improve it without fitting noise.
 5. [Review findings](findings.md): verified setup issues and remaining limitations.
+6. [Backlog](backlog.md): deferred work with the reasoning behind it.
 
 ## Source inventory
 

@@ -713,6 +713,49 @@ month, not the 2 to 3% requested. Closing that gap requires a sustained hit rate
 above 60%, which nothing here has demonstrated. No position has been opened and
 no forward result exists.
 
+## Trade journal — September 12, 2026
+
+`trade_journal` and `createJournalEntry` existed in the schema and query layer
+with no callers, the same pattern as the unused ATR library and the realised-loss
+counter. The table already carried exit price, P&L, hold duration, outcome and
+lessons; only the wiring was missing.
+
+The journal records **why a decision was made, at the moment it was made**. None
+of that survives to the exit: research expires from its cache, the macro regime
+moves, the catalyst ages out. A journal assembled at exit can record only
+outcomes, which is the half that teaches nothing about selection.
+
+Captured at entry, in `helpers/thesis.ts`:
+
+- The catalyst that permitted the trade — type, quality, headline, age in hours.
+- The model's own conclusion — verdict, confidence, entry quality, reasoning,
+  red flags — so confidence can later be scored against outcomes.
+- Every measured gate value: price, percent of 52-week high, ATR, RSI, trend,
+  relative volume, spread, extension, range position, ADV20. A threshold can
+  then be re-tested against trades already taken.
+- The plan: stop, target, notional and risk in dollars. Risk is stored rather
+  than recomputed because it is the denominator of the R multiple.
+- Macro state as flat tags (`risk:risk-on`, `leader:XLK`) so entries group by
+  regime.
+
+Outcomes are recorded in **R**, the only unit that compares trades with
+different stops: +15% is 1R on a 15% stop and 3R on a 5% stop.
+
+Exit marks are captured when the exit is decided, not when the fill confirms —
+`onSell` now fires from broker reconciliation, by which point the position no
+longer exists and its P&L cannot be recovered. The stored note says explicitly
+that P&L is marked at decision rather than at fill. Journalling failures are
+caught and logged; they can never block or fail a trade.
+
+`GET /agent/journal` reads it back and `npm run paper:journal` renders it,
+grouping closed trades by catalyst type and outcome. That grouping is the
+purpose: finding out which reasons actually pay before trusting them with size.
+
+Questions it is built to answer: do guidance catalysts pay better than earnings
+beats, is the 52-week gate at 70% selecting better trades than 75% would have,
+do entries in leading sectors outperform, and is model confidence correlated
+with outcome at all. None of these can be answered yet — nothing has traded.
+
 ## Diagnostics and reusable instructions
 
 ```bash

@@ -242,3 +242,58 @@ export async function setPreferences(db: D1Client, preferences: Record<string, u
     nowISO(),
   ]);
 }
+
+export interface CloseJournalEntryParams {
+  symbol: string;
+  exit_price: number;
+  exit_at?: string;
+  pnl_usd: number;
+  pnl_pct: number;
+  outcome: "win" | "loss" | "scratch";
+  /** Exit reason plus the R multiple, which is the comparable unit across stops. */
+  lessons_learned?: string;
+}
+
+/**
+ * Close the most recent open entry for a symbol.
+ *
+ * Matched on the open row rather than an id because the exit path is reached
+ * from broker state, which carries no journal reference. Positions are unique
+ * per symbol here (no pyramiding), so the newest open row is unambiguous.
+ */
+export async function closeJournalEntry(db: D1Client, params: CloseJournalEntryParams): Promise<boolean> {
+  const now = nowISO();
+  const open = await db.executeOne<{ id: string; entry_at: string | null }>(
+    `SELECT id, entry_at FROM trade_journal WHERE symbol = ? AND exit_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+    [params.symbol]
+  );
+  if (!open) return false;
+
+  const exitAt = params.exit_at ?? now;
+  const entryMs = open.entry_at ? Date.parse(open.entry_at) : Number.NaN;
+  const heldMins = Number.isFinite(entryMs) ? Math.round((Date.parse(exitAt) - entryMs) / 60_000) : null;
+
+  await db.run(
+    `UPDATE trade_journal
+        SET exit_price = ?, exit_at = ?, pnl_usd = ?, pnl_pct = ?, hold_duration_mins = ?,
+            outcome = ?, lessons_learned = ?, updated_at = ?
+      WHERE id = ?`,
+    [
+      params.exit_price,
+      exitAt,
+      params.pnl_usd,
+      params.pnl_pct,
+      heldMins,
+      params.outcome,
+      params.lessons_learned ?? null,
+      now,
+      open.id,
+    ]
+  );
+  return true;
+}
+
+/** Most recent journal entries, newest first. */
+export async function recentJournalEntries(db: D1Client, limit = 50): Promise<TradeJournalRow[]> {
+  return db.execute<TradeJournalRow>(`SELECT * FROM trade_journal ORDER BY created_at DESC LIMIT ?`, [limit]);
+}
