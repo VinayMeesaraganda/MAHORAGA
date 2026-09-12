@@ -293,6 +293,26 @@ export async function closeJournalEntry(db: D1Client, params: CloseJournalEntryP
   return true;
 }
 
+/**
+ * Remove the open journal row for a symbol.
+ *
+ * The thesis is written at buy *intent*, because the gate values, catalyst and
+ * macro regime that justified the decision cannot be reconstructed once the
+ * moment passes. When the order is then abandoned — rejected, or reconciled
+ * against no holding — that row describes a trade that never existed. Closing
+ * it would enter a fabricated scratch into every R statistic; deleting it is
+ * the honest option, because an unfilled order is not a trade record.
+ */
+export async function deleteOpenJournalEntry(db: D1Client, symbol: string): Promise<boolean> {
+  const open = await db.executeOne<{ id: string }>(
+    `SELECT id FROM trade_journal WHERE symbol = ? AND exit_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+    [symbol]
+  );
+  if (!open) return false;
+  await db.run(`DELETE FROM trade_journal WHERE id = ?`, [open.id]);
+  return true;
+}
+
 /** Most recent journal entries, newest first. */
 export async function recentJournalEntries(db: D1Client, limit = 50): Promise<TradeJournalRow[]> {
   return db.execute<TradeJournalRow>(`SELECT * FROM trade_journal ORDER BY created_at DESC LIMIT ?`, [limit]);

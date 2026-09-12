@@ -113,16 +113,30 @@ describe("the one path that withdraws a flag", () => {
 });
 
 describe("adjudicationKey", () => {
+  const e = { headline: flag.headline, summary: flag.summary, updated_at: "2026-09-12T10:00:00Z" };
+
   it("is stable across calls so an article is judged once", () => {
-    expect(adjudicationKey("META", flag.headline)).toBe(adjudicationKey("META", flag.headline));
+    expect(adjudicationKey("META", e)).toBe(adjudicationKey("META", e));
   });
 
   it("separates symbols and headlines", () => {
-    expect(adjudicationKey("META", flag.headline)).not.toBe(adjudicationKey("GOOGL", flag.headline));
-    expect(adjudicationKey("META", flag.headline)).not.toBe(adjudicationKey("META", "something else"));
+    expect(adjudicationKey("META", e)).not.toBe(adjudicationKey("GOOGL", e));
+    expect(adjudicationKey("META", e)).not.toBe(adjudicationKey("META", { ...e, headline: "something else" }));
+  });
+
+  it("re-judges a corrected article rather than serving the old verdict", () => {
+    // Wires correct in place. A headline can stand while the summary gains the
+    // adverse paragraph it lacked at first publication — reusing the earlier
+    // verdict would suppress precisely what the correction added.
+    expect(adjudicationKey("META", e)).not.toBe(adjudicationKey("META", { ...e, updated_at: "2026-09-12T14:30:00Z" }));
+    expect(adjudicationKey("META", e)).not.toBe(
+      adjudicationKey("META", { ...e, summary: `${e.summary} The company also disclosed a going-concern warning.` })
+    );
   });
 
   it("is prefixed by the symbol, so the log is readable", () => {
-    expect(adjudicationKey("ORCL", "Larry Ellison cancels his plan to sell Oracle stock")).toMatch(/^ORCL:/);
+    expect(adjudicationKey("ORCL", { ...e, headline: "Ellison cancels his plan to sell Oracle stock" })).toMatch(
+      /^ORCL:/
+    );
   });
 });

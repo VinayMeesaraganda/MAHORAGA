@@ -150,6 +150,7 @@ export const DEFAULT_STATE: AgentState = {
   positionResearch: {},
   stalenessAnalysis: {},
   recentExits: {},
+  pendingExitMarks: {},
   learnings: null,
   insiderTransactions: [],
   processedForm4: {},

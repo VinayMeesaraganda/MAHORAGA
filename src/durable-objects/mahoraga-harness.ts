@@ -25,6 +25,7 @@ import type {
   AgentState,
   LogEntry,
   MarketContext,
+  PositionEntry,
   ResearchResult,
   Signal,
   SocialHistoryEntry,
@@ -54,7 +55,12 @@ import {
   SignalResearchResponseSchema,
 } from "../schemas/llm-responses";
 import { createD1Client } from "../storage/d1/client";
-import { closeJournalEntry, createJournalEntry, recentJournalEntries } from "../storage/d1/queries/memory";
+import {
+  closeJournalEntry,
+  createJournalEntry,
+  deleteOpenJournalEntry,
+  recentJournalEntries,
+} from "../storage/d1/queries/memory";
 import { activeStrategy } from "../strategy";
 import { DEFAULT_STATE } from "../strategy/default/config";
 import {
@@ -62,6 +68,7 @@ import {
   gatherTwitterConfirmation,
   isTwitterEnabled,
 } from "../strategy/default/gatherers/twitter";
+import { type AdverseEvidence, adjudicateAdverse, adjudicationKey } from "../strategy/default/helpers/adjudicate";
 import { adverseCatalystReason, bestCatalyst } from "../strategy/default/helpers/catalyst";
 import { isCryptoSymbol, normalizeCryptoSymbol } from "../strategy/default/helpers/crypto";
 import { summariseJournal } from "../strategy/default/helpers/learnings";
@@ -238,8 +245,17 @@ export class MahoragaHarness extends DurableObject<Env> {
       },
       onBuyAbandoned: (symbol) => {
         delete self.state.positionEntries[symbol];
+        // The thesis was written at intent, because it cannot be reconstructed
+        // later. An abandoned order never became a trade, so that row would
+        // enter a fabricated scratch into every R statistic.
+        void self.discardJournalEntry(symbol);
       },
       onSell: (symbol) => {
+        // Snapshot before deleting: journalExit reads stop_pct off this object
+        // to compute the R multiple, and deleting first silently fell back to
+        // the config default. Every R in the record would have been measured
+        // against a stop the trade never used.
+        const closing = self.state.positionEntries[symbol];
         delete self.state.positionEntries[symbol];
         delete self.state.socialHistory[symbol];
         delete self.state.stalenessAnalysis[symbol];
@@ -247,7 +263,7 @@ export class MahoragaHarness extends DurableObject<Env> {
         // window when a stop fills, so record the exit and let the entry gate
         // enforce a cooldown instead of re-buying the same name minutes later.
         self.recordExit(symbol);
-        void self.journalExit(symbol);
+        void self.journalExit(symbol, closing);
       },
     });
 
@@ -337,12 +353,19 @@ export class MahoragaHarness extends DurableObject<Env> {
         );
         for (const exit of exits) {
           if (!this.state.enabled) break;
+          // A pattern matcher must not be the last word before a position is
+          // closed. This runs here rather than in the news gatherer because
+          // gatherers are given `llm: null` by design — the adjudicator placed
+          // there could never have fired, and silently fell through to the regex.
+          if (exit.reason.startsWith("Adverse issuer news") && (await this.adverseExitOverturned(ctx, exit.symbol))) {
+            continue;
+          }
           // Capture the marks before submitting: once the fill is confirmed the
           // position no longer exists and its P&L cannot be recovered.
           const held = positions.find((p) => p.symbol === exit.symbol);
           const basis = held ? held.market_value - held.unrealized_pl : 0;
           if (held && basis > 0) {
-            this.pendingExitMarks[exit.symbol] = {
+            this.state.pendingExitMarks[exit.symbol] = {
               price: held.current_price,
               pnl_usd: held.unrealized_pl,
               pnl_pct: (held.unrealized_pl / basis) * 100,
@@ -997,12 +1020,19 @@ export class MahoragaHarness extends DurableObject<Env> {
 
       if (finalConfidence < this.state.config.min_analyst_confidence) continue;
 
-      // Options routing
+      // Options routing. Whatever happens here, the equity path below must not
+      // also run: on success that would double the exposure for one signal, and
+      // on refusal it silently substitutes a different instrument for the one
+      // the trade was sized and reasoned for.
       if (entry.useOptions) {
         const contract = await findBestOptionsContract(ctx, entry.symbol, "bullish", account.equity);
-        if (contract) {
-          await this.executeOptionsOrder(contract, 1, account.equity);
-        }
+        const placed = contract ? await this.executeOptionsOrder(contract, 1, account.equity) : false;
+        this.log("Options", placed ? "options_route_taken" : "options_route_failed", {
+          symbol: entry.symbol,
+          contract: contract?.symbol ?? null,
+          equity_fallback: false,
+        });
+        continue;
       }
 
       // Execute buy via policy broker
@@ -1659,7 +1689,6 @@ export class MahoragaHarness extends DurableObject<Env> {
   }
 
   /** Exit marks captured at decision time, keyed by symbol, consumed on fill confirmation. */
-  private pendingExitMarks: Record<string, { price: number; pnl_usd: number; pnl_pct: number; reason: string }> = {};
 
   /**
    * Journal why a trade was taken, at the moment it was taken.
@@ -1767,14 +1796,17 @@ export class MahoragaHarness extends DurableObject<Env> {
   }
 
   /** Close the journal entry with the outcome, in R so trades with different stops compare. */
-  private async journalExit(symbol: string): Promise<void> {
+  private async journalExit(symbol: string, closing?: PositionEntry): Promise<void> {
     const db = createD1Client(this.env.DB);
-    const marks = this.pendingExitMarks[symbol];
-    delete this.pendingExitMarks[symbol];
+    const marks = this.state.pendingExitMarks?.[symbol];
+    if (this.state.pendingExitMarks) delete this.state.pendingExitMarks[symbol];
     if (!db || !marks) return;
     try {
-      const entry = this.state.positionEntries?.[symbol];
+      const entry = closing ?? this.state.positionEntries?.[symbol];
       const stopPct = entry?.stop_pct ?? this.state.config.stop_loss_pct;
+      if (!closing) {
+        this.log("Journal", "exit_without_entry_snapshot", { symbol, fallback_stop_pct: stopPct });
+      }
       const r = rMultiple(marks.pnl_pct, stopPct);
       const evidence = await this.gatherExitEvidence(symbol, marks, stopPct);
       const attribution = attributeExit(evidence);
@@ -1805,6 +1837,83 @@ export class MahoragaHarness extends DurableObject<Env> {
       await this.refreshLearnings();
     } catch (error) {
       this.log("Journal", "exit_failed", { symbol, error: String(error) });
+    }
+  }
+
+  /**
+   * Second opinion before an adverse-news exit fires.
+   *
+   * Returns true only when the model says, with confidence, that the flagged
+   * story is not adverse — the single path that spares a position. Every other
+   * outcome, including every failure, returns false and lets the exit proceed,
+   * because the conservative action for capital is the one already in flight.
+   */
+  private async adverseExitOverturned(ctx: StrategyContext, symbol: string): Promise<boolean> {
+    const mode = this.state.config.news_adjudication;
+    if (mode === "off") return false;
+
+    const evidence = ctx.state.get<Record<string, AdverseEvidence>>("adverseEvidence")?.[symbol];
+    if (!evidence) return false;
+
+    const cache = ctx.state.get<Record<string, { upheld: boolean; at: number }>>("adjudications") ?? {};
+    const key = adjudicationKey(symbol, evidence);
+    let entry = cache[key];
+    let note = "cached";
+
+    if (!entry) {
+      const outcome = await adjudicateAdverse(ctx.llm, {
+        symbol,
+        headline: evidence.headline,
+        summary: evidence.summary,
+        matched: evidence.reason,
+      });
+      entry = { upheld: outcome.upheld, at: Date.now() };
+      note = outcome.note;
+      const maxAge = Math.max(1, this.state.config.entry_max_catalyst_age_minutes) * 60_000;
+      for (const [k, v] of Object.entries(cache)) if (Date.now() - v.at > maxAge) delete cache[k];
+      cache[key] = entry;
+      ctx.state.set("adjudications", cache);
+      this.log("News", "adjudicated", {
+        symbol,
+        mode,
+        matched: evidence.reason,
+        upheld: outcome.upheld,
+        note,
+        headline: evidence.headline.slice(0, 120),
+        event: outcome.verdict?.event ?? null,
+        quote: outcome.verdict?.quote?.slice(0, 120) ?? null,
+        reasoning: outcome.verdict?.reasoning?.slice(0, 200) ?? null,
+      });
+    }
+
+    if (entry.upheld) return false;
+    if (mode === "shadow") {
+      this.log("News", "adjudication_shadowed", { symbol, note, would_have_spared: true });
+      return false;
+    }
+
+    // Clear the flag as well as skipping the sell, or the exit rule proposes the
+    // same close again on the very next pass.
+    const invalidated = ctx.state.get<Record<string, number>>("catalystInvalidatedAt") ?? {};
+    delete invalidated[symbol];
+    delete invalidated[symbol.toUpperCase()];
+    ctx.state.set("catalystInvalidatedAt", invalidated);
+    const all = ctx.state.get<Record<string, AdverseEvidence>>("adverseEvidence") ?? {};
+    delete all[symbol];
+    ctx.state.set("adverseEvidence", all);
+    this.log("News", "adverse_exit_overturned", { symbol, matched: evidence.reason, note });
+    return true;
+  }
+
+  /** Remove the open journal row for an order that never became a position. */
+  private async discardJournalEntry(symbol: string): Promise<void> {
+    const db = createD1Client(this.env.DB);
+    if (!db) return;
+    try {
+      const removed = await deleteOpenJournalEntry(db, symbol);
+      if (removed) this.log("Journal", "entry_discarded", { symbol, reason: "order abandoned before fill" });
+    } catch (error) {
+      this.log("Journal", "discard_failed", { symbol, error: String(error) });
     }
   }
 

@@ -212,6 +212,13 @@ export interface AgentState {
   stalenessAnalysis: Record<string, unknown>;
   /** Symbol -> epoch ms of the most recent exit, for the re-entry cooldown. */
   recentExits: Record<string, number>;
+  /**
+   * P&L captured at the moment an exit is decided, held until the journal
+   * records it. Persisted rather than in-memory: a Durable Object can be
+   * evicted between the sell and the journal write, and an in-memory mark
+   * would take the only record of the trade's outcome with it.
+   */
+  pendingExitMarks: Record<string, { price: number; pnl_usd: number; pnl_pct: number; reason: string }>;
   /** Aggregated journal record, injected into prompts as evidence. Shape in helpers/learnings. */
   learnings: unknown;
   /** Rolling Form 4 open-market purchases; clusters form across filings and days. */

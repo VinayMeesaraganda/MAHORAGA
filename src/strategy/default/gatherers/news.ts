@@ -16,7 +16,7 @@ import { createAlpacaProviders } from "../../../providers/alpaca";
 import type { MarketNewsItem } from "../../../providers/types";
 import type { Gatherer, StrategyContext } from "../../types";
 import { SOURCE_CONFIG } from "../config";
-import { adjudicateAdverse, adjudicationKey, MAX_ADJUDICATIONS_PER_PASS } from "../helpers/adjudicate";
+import type { AdverseEvidence } from "../helpers/adjudicate";
 import { adverseCatalystReason, type CatalystHit, classifyCatalyst } from "../helpers/catalyst";
 import { detectSentiment } from "../helpers/sentiment";
 
@@ -174,70 +174,29 @@ async function gatherNews(ctx: StrategyContext): Promise<Signal[]> {
     flagged.push({ symbol, at, reason, article });
   }
 
-  // The pattern matcher reads vocabulary, and vocabulary is unbounded: three
-  // defects in one week were all a negative word describing a negative being
-  // removed. A model reads the event. It is consulted only for symbols actually
-  // held, because that is the only case where a false flag costs money — for a
-  // symbol not held, the flag merely blocks an entry, which costs opportunity,
-  // and an entry is protected by every gate downstream anyway. Held symbols are
-  // also already excluded from entry selection, so overturning a flag here can
-  // only spare a position. There is no path from a model reply to an order.
-  const mode = ctx.config.news_adjudication;
-  const judged = ctx.state.get<Record<string, { upheld: boolean; at: number }>>("adjudications") ?? {};
-  for (const [k, v] of Object.entries(judged)) if (now - v.at > maxAgeMs) delete judged[k];
-
-  if (mode !== "off" && flagged.length > 0) {
-    let held: Set<string>;
-    try {
-      held = new Set((await ctx.broker.getPositions()).map((p) => p.symbol.toUpperCase()));
-    } catch {
-      held = new Set();
-    }
-    const pending = flagged
-      .filter((f) => held.has(f.symbol) && judged[adjudicationKey(f.symbol, f.article.headline)] === undefined)
-      .slice(0, MAX_ADJUDICATIONS_PER_PASS);
-
-    // Concurrently, so the worst case for the pass is one request deadline
-    // rather than the sum of them.
-    const outcomes = await Promise.all(
-      pending.map((f) =>
-        adjudicateAdverse(ctx.llm, {
-          symbol: f.symbol,
-          headline: f.article.headline,
-          summary: f.article.summary,
-          matched: f.reason,
-        })
-      )
-    );
-    pending.forEach((f, i) => {
-      const outcome = outcomes[i]!;
-      judged[adjudicationKey(f.symbol, f.article.headline)] = { upheld: outcome.upheld, at: now };
-      ctx.log("News", "adjudicated", {
-        symbol: f.symbol,
-        matched: f.reason,
-        upheld: outcome.upheld,
-        note: outcome.note,
-        mode,
-        headline: f.article.headline.slice(0, 120),
-        quote: outcome.verdict?.quote?.slice(0, 120) ?? null,
-        event: outcome.verdict?.event ?? null,
-        reasoning: outcome.verdict?.reasoning?.slice(0, 200) ?? null,
-        // Shadow records what would have changed without changing it.
-        would_have_changed: !outcome.upheld,
-      });
-    });
-  }
-  ctx.state.set("adjudications", judged);
+  // The regex stays here as deterministic triage — this context cannot do more.
+  // `gatherWithinDeadline` hands every gatherer `llm: null` and a 15s budget on
+  // purpose, so a slow or hostile source can neither block the alarm nor spend
+  // model credit. Adjudication therefore records its evidence here and happens
+  // in the harness, at the moment an exit is about to fire, where the model and
+  // a real deadline both exist.
+  const evidence = ctx.state.get<Record<string, AdverseEvidence>>("adverseEvidence") ?? {};
+  for (const [symbol, e] of Object.entries(evidence)) if (!isCurrent(e.at)) delete evidence[symbol];
 
   for (const f of flagged) {
-    const decided = judged[adjudicationKey(f.symbol, f.article.headline)];
-    if (mode === "enforce" && decided && !decided.upheld) {
-      ctx.log("News", "catalyst_invalidation_withdrawn", { symbol: f.symbol, reason: f.reason });
-      continue;
-    }
     invalidatedAt[f.symbol] = f.at;
+    evidence[f.symbol] = {
+      at: f.at,
+      reason: f.reason,
+      headline: f.article.headline,
+      summary: (f.article.summary ?? "").slice(0, 1500),
+      // Carried so a corrected article is re-judged rather than reusing a
+      // verdict formed on the text before the correction.
+      updated_at: f.article.updated_at ?? f.article.created_at,
+    };
     ctx.log("News", "catalyst_invalidated", { symbol: f.symbol, at: f.at, reason: f.reason });
   }
+  ctx.state.set("adverseEvidence", evidence);
   for (const [symbol, hits] of Object.entries(catalystCache)) {
     const kept = hits.filter((hit) => hit.at > (invalidatedAt[symbol] ?? 0));
     if (kept.length) catalystCache[symbol] = kept;
