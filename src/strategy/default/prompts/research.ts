@@ -7,6 +7,7 @@
 import type { Position } from "../../../core/types";
 import type { PromptTemplate, ResearchPositionPromptBuilder, ResearchSignalPromptBuilder } from "../../types";
 import { bestCatalyst, type CatalystHit } from "../helpers/catalyst";
+import { describeLearnings, type Learnings } from "../helpers/learnings";
 import { describeMacroRegime, type MacroRegime } from "../helpers/macro";
 import { describeMarketContext } from "../helpers/market";
 
@@ -33,6 +34,9 @@ SENTIMENT: ${(sentiment * 100).toFixed(0)}% bullish (sources: ${sources.join(", 
 CURRENT DATA:
 ${market ? describeMarketContext(market) : `- Price: $${price}\n- Liquidity and extension data: unknown`}
 
+YOUR OWN TRACK RECORD (what these setups have actually done):
+${describeLearnings(ctx.state.get<Learnings>("learnings"))}
+
 MARKET BACKDROP (measured today, not inferred from news):
 ${describeMacroRegime(ctx.state.get<MacroRegime>("macroRegime"))}
 
@@ -57,6 +61,8 @@ This is a long-only entry held for days with a fixed percentage stop, so judge:
 - Does volume confirm the sentiment, or is it chat without participation?
 - Can a position be exited at this spread and this liquidity?
 - Is the catalyst above a durable revaluation, or a one-day headline?
+- Does the track record above say anything about this catalyst type? Small
+  samples are weak evidence — weigh them, do not treat them as a rule.
 - Does the backdrop support a multi-day long here, or is this a strong name in a
   sector the tape is selling? Use the measured sector moves above; do not assert
   what any headline "should" mean for a sector.

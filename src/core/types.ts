@@ -210,6 +210,8 @@ export interface AgentState {
   stalenessAnalysis: Record<string, unknown>;
   /** Symbol -> epoch ms of the most recent exit, for the re-entry cooldown. */
   recentExits: Record<string, number>;
+  /** Aggregated journal record, injected into prompts as evidence. Shape in helpers/learnings. */
+  learnings: unknown;
   twitterConfirmations: Record<string, TwitterConfirmation>;
   twitterDailyReads: number;
   twitterDailyReadReset: number;

@@ -878,6 +878,66 @@ Both are the kind of message that would have been read at 09:06 on a Monday.
 The tasks are instructed not to edit configuration or catalyst data to clear a
 failing check. A failing check before the open is the reason for running it.
 
+## Feeding the journal back — September 12, 2026
+
+The journal was write-only: one HTTP endpoint read it and nothing fed it into a
+decision. `helpers/learnings.ts` aggregates it and both prompts now carry the
+record.
+
+### Why it goes into the prompt and not into the configuration
+
+The obvious design is to let the model retune its own thresholds from past
+results. The sample size forbids it. At roughly three trades a week:
+
+| Elapsed | Trades | Hit rate, 95% interval |
+|---|---:|---|
+| 4 weeks | 12 | ±28 points |
+| 12 weeks | 36 | ±16 points |
+| 26 weeks | 78 | ±11 points |
+| 52 weeks | 156 | ±8 points |
+
+Splitting by catalyst type divides those again, and there are roughly twenty
+tunable thresholds. Fitting twenty knobs to twelve observations fits noise. The
+safety argument is shorter: an agent that can widen its own risk limits does not
+have risk limits.
+
+So nothing here changes a threshold. The aggregate is rendered into the research
+and analyst prompts alongside the catalyst, the gates and the macro backdrop, as
+one more piece of evidence for the model to weigh. Both prompts end the section
+with "this is a record, not a rule — weigh it, do not obey it".
+
+### Sample sizes travel with every figure
+
+Any bucket under five trades reports its count and declines to state an average.
+A statistic without its n invites exactly the overfitting this avoids. R is
+computed from each trade's own stop, because +15% is 1R on a 15% stop and 3R on
+a 5% one; averaging raw percentages across volatility-sized positions would be
+meaningless.
+
+Rendered example from a simulated first month:
+
+```
+- Closed trades: 12, 7 winners, net $3210, average 0.62R
+- By catalyst: earnings 3/6 at 0.23R · guidance 4/5 at 1.40R · analyst 0/1 (thin)
+- Exit causes: target_hit 6 · thesis 3 · macro 1 · discretionary 1 · company_event 1
+- Confidence calibration: 0.70-0.79 5/6 at 1.50R · 0.80+ 2/5 at -0.12R
+- Of the losses, 3 came from selection and 2 from the tape, the sector, a
+  post-entry event or too tight a stop.
+```
+
+### Confidence calibration
+
+Stated confidence is bucketed and scored against realised R. When the high
+bucket fails to beat the low one the prompt says so outright: "high-confidence
+calls have not outperformed low-confidence ones; treat your own confidence as
+uninformative here." That is the most useful thing the journal can reveal about
+the model, and it is invisible without this aggregation — confidence already
+gates entries at 0.6 and scales position size.
+
+The aggregate is recomputed when a trade closes, which is the only event that
+changes it, and on enable so a restart does not lose the record before the first
+decision. `GET /agent/learnings` returns it.
+
 ## Diagnostics and reusable instructions
 
 ```bash

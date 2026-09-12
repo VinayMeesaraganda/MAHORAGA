@@ -147,6 +147,7 @@ export const DEFAULT_STATE: AgentState = {
   positionResearch: {},
   stalenessAnalysis: {},
   recentExits: {},
+  learnings: null,
   twitterConfirmations: {},
   twitterDailyReads: 0,
   twitterDailyReadReset: 0,

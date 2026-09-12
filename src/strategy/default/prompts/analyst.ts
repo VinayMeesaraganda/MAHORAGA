@@ -4,6 +4,7 @@
 
 import type { Account, Position, Signal } from "../../../core/types";
 import type { AnalyzeSignalsPromptBuilder, PromptTemplate, StrategyContext } from "../../types";
+import { describeLearnings, type Learnings } from "../helpers/learnings";
 import { describeMacroRegime, type MacroRegime } from "../helpers/macro";
 
 /**
@@ -38,6 +39,9 @@ export const analyzeSignalsPrompt: AnalyzeSignalsPromptBuilder = (
   const macroHeadlines = ctx.state.get<Array<{ headline: string; source: string }>>("macroHeadlines") ?? [];
 
   const user = `Current Time: ${new Date().toISOString()}
+
+YOUR OWN TRACK RECORD:
+${describeLearnings(ctx.state.get<Learnings>("learnings"))}
 
 MARKET BACKDROP (measured today, not inferred):
 ${describeMacroRegime(ctx.state.get<MacroRegime>("macroRegime"))}
@@ -99,6 +103,9 @@ Rules:
 - Give positions time to develop - avoid selling too early just because gains are small
 - Positions held less than 1-2 hours should generally be given more time unless hitting stop loss
 - Consider the QUALITY of sentiment, not just quantity
+- Weigh the track record above. If a catalyst type has repeatedly lost, say so
+  in your reasoning rather than repeating it. If your own stated confidence has
+  not predicted outcomes, stop leaning on it
 - Weigh the measured market backdrop: prefer longs in sectors the tape is
   leading, and be sceptical of longs in sectors it is selling
 - Headlines describe what was published; the backdrop describes what the market

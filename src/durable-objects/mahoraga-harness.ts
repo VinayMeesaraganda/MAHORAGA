@@ -64,6 +64,7 @@ import {
 } from "../strategy/default/gatherers/twitter";
 import { adverseCatalystReason, bestCatalyst } from "../strategy/default/helpers/catalyst";
 import { isCryptoSymbol, normalizeCryptoSymbol } from "../strategy/default/helpers/crypto";
+import { summariseJournal } from "../strategy/default/helpers/learnings";
 import { deriveMarketContext, withTechnicals } from "../strategy/default/helpers/market";
 import { attributeExit, type ExitEvidence } from "../strategy/default/helpers/postmortem";
 import { buildThesis, classifyOutcome, regimeTags, rMultiple } from "../strategy/default/helpers/thesis";
@@ -1310,6 +1311,7 @@ export class MahoragaHarness extends DurableObject<Env> {
       "setup/status",
       "catalysts",
       "journal",
+      "learnings",
     ];
     if (protectedActions.includes(action)) {
       if (!this.isAuthorized(request)) return this.unauthorizedResponse();
@@ -1321,6 +1323,8 @@ export class MahoragaHarness extends DurableObject<Env> {
           return this.handleCatalysts(request);
         case "journal":
           return this.handleJournal(url);
+        case "learnings":
+          return this.handleLearnings();
         case "status":
           return this.handleStatus();
         case "setup/status":
@@ -1509,6 +1513,8 @@ export class MahoragaHarness extends DurableObject<Env> {
       );
     }
     this.state.enabled = true;
+    // A restart must not lose the record: reload it before the first decision.
+    await this.refreshLearnings();
     await this.persist();
     await this.scheduleNextAlarm();
     this.log("System", "agent_enabled", {});
@@ -1619,6 +1625,12 @@ export class MahoragaHarness extends DurableObject<Env> {
     return volatilitySizedTrade(equity, this.state.config, atrPct);
   }
 
+  /** The aggregate the prompts read. Recomputed on demand so it is never stale here. */
+  private async handleLearnings(): Promise<Response> {
+    await this.refreshLearnings();
+    return this.jsonResponse({ ok: true, learnings: this.state.learnings ?? null });
+  }
+
   /** Read the trade journal. The record of why, not just what. */
   private async handleJournal(url: URL): Promise<Response> {
     const db = createD1Client(this.env.DB);
@@ -1628,6 +1640,32 @@ export class MahoragaHarness extends DurableObject<Env> {
       return this.jsonResponse({ ok: true, entries: await recentJournalEntries(db, limit) });
     } catch (error) {
       return this.jsonResponse({ ok: false, error: String(error) });
+    }
+  }
+
+  /**
+   * Recompute the journal aggregate that prompts read.
+   *
+   * Deliberately does not touch configuration. At roughly three trades a week a
+   * month yields twelve observations and a hit rate accurate to plus or minus
+   * twenty-eight points; retuning thresholds on that fits noise, and an agent
+   * that can widen its own risk limits has none. The record goes into the
+   * prompt as evidence and the limits stay where a human put them.
+   */
+  private async refreshLearnings(): Promise<void> {
+    const db = createD1Client(this.env.DB);
+    if (!db) return;
+    try {
+      const entries = await recentJournalEntries(db, 200);
+      const learnings = summariseJournal(entries);
+      this.state.learnings = learnings;
+      this.log("Journal", "learnings_refreshed", {
+        closed: learnings.total_closed,
+        wins: learnings.overall.wins,
+        avg_r: learnings.overall.avg_r?.toFixed(2) ?? "insufficient sample",
+      });
+    } catch (error) {
+      this.log("Journal", "learnings_failed", { error: String(error) });
     }
   }
 
@@ -1773,6 +1811,9 @@ export class MahoragaHarness extends DurableObject<Env> {
         cause: attribution.cause,
         selection_valid: attribution.selection_still_valid,
       });
+      // A closed trade is the only event that changes the record, so this is
+      // the only moment the aggregate needs recomputing.
+      await this.refreshLearnings();
     } catch (error) {
       this.log("Journal", "exit_failed", { symbol, error: String(error) });
     }
