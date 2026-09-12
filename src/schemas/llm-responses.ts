@@ -68,3 +68,21 @@ export function parseAnalystRecommendations(raw: unknown[]): {
   }
   return { valid, rejected };
 }
+
+/**
+ * A second opinion on a headline the pattern matcher flagged as adverse.
+ *
+ * The regex decides on vocabulary; this decides on the event. `quote` is
+ * required so the reasoning is auditable in the journal rather than a bare
+ * verdict — a model that cannot point at the phrase it judged is guessing.
+ */
+export const NewsAdjudicationSchema = z.object({
+  direction: z.enum(["adverse", "favourable", "neutral"]),
+  event: z.string().trim().min(1).max(80),
+  severity: z.enum(["high", "medium", "low"]),
+  confidence: z.number().min(0).max(1),
+  quote: z.string().trim().max(300),
+  reasoning: z.string().trim().min(1).max(600),
+});
+
+export type NewsAdjudication = z.infer<typeof NewsAdjudicationSchema>;

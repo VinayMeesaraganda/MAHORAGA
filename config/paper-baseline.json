@@ -46,5 +46,6 @@
   "trailing_arm_r": 1.5,
   "trailing_stop_r": 1.0,
   "exit_on_adverse_news": true,
+  "news_adjudication": "enforce",
   "gap_capture_r": 1.5
 }

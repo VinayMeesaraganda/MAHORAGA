@@ -1287,3 +1287,64 @@ produces no Form 4 at all, since no transaction occurs, so this event is
 invisible to that path by nature. Making it an entry catalyst would mean new
 entry surface justified by nothing measured, and the `UNCONFIRMED` filter would
 reject most such wording anyway on the word "plan".
+
+## The regex stops being the judge
+
+Three defects in one week — BSX, META, Oracle — were one defect. A guidance cut
+phrased eight ways matched twice. "Settles class action" read as a pending class
+action. "Cancels plan to sell shares" read as a share sale. Each was fixed by
+widening a pattern, and each fix was a bet that the next author would reuse the
+vocabulary of the last. They do not: the next one writes "nixes", "scraps",
+"walks back", "puts to bed".
+
+That is not a tuning problem, it is the wrong instrument. `adverseCatalystReason`
+decides on vocabulary, and vocabulary is unbounded. Worse, its verdict was
+binding: the chain ran regex match to `catalystInvalidatedAt` to `exits.ts`
+closing the position, with nothing in between. A pattern matcher had unilateral
+authority to sell. The model, meanwhile, was handed the regex's conclusion
+pre-computed — `guidance (high quality)` — and only ever saw bare headlines,
+because the article summary was fetched and discarded.
+
+`adjudicate.ts` inverts the division of labour on the axis that matters.
+Deterministic code keeps every judgement that is arithmetic and expensive to get
+wrong: price, volume, extension, stop distance, position size, the kill switch.
+Reading English is not arithmetic. A flagged headline now goes to the model with
+its summary attached, and the reply is validated by Zod into a closed shape
+before anything acts on it.
+
+Two properties make it safe to run against real money, and both are structural
+rather than promised:
+
+**It can only spare a position.** The model is consulted solely on headlines the
+regex already condemned, and only for symbols actually held. A favourable or
+neutral verdict withdraws that condemnation and nothing else. Held symbols are
+already excluded from entry selection, so there is no path from a model reply to
+an order — only a path to *not* closing one. For a symbol not held, the flag
+stands unexamined, because there the cost is a blocked entry, which is
+opportunity rather than money, and an entry has every gate downstream anyway.
+
+**Every failure resolves to the regex's answer.** No key, no reply, a timeout,
+malformed JSON, a shape Zod rejects, a confidence below 0.70 — all of them leave
+the flag standing. An outage cannot strand a position in bad news, because the
+conservative action for capital is the one already in flight. Seven of the
+thirteen tests exist only to hold that property down.
+
+Cost is bounded by construction rather than by a budget check: at most four
+adjudications per pass, only for held symbols, cached per article so one story
+is judged once, and issued concurrently so the worst case for a pass is one
+request deadline instead of the sum of them. With five positions maximum and
+flagged headlines rare, most sessions will make none.
+
+`news_adjudication` is `off` / `shadow` / `enforce`, shipped as `enforce`. Shadow
+exists because it is the honest default for a change justified by argument
+rather than measurement — but the argument here is one-directional. Wrongly
+selling a winner on good news is a realised loss and a destroyed thesis record;
+wrongly holding through bad news is capped by a stop that is always in place.
+Every failure path already falls back to today's behaviour, so `enforce` is
+strictly safer than the status quo on the one axis that has produced three bugs.
+The model quotes the phrase it judged, so the log records evidence rather than a
+verdict.
+
+Not changed: the positive catalyst path still classifies on regex. A false
+positive there costs a research call and is then filtered by the gates and by
+the research model. The exit had no such second line, which is why it went first.

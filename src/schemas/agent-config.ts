@@ -113,6 +113,14 @@ export const AgentConfigSchema = z
      * break-even hit rate from 33% to 71%.
      */
     exit_on_adverse_news: z.boolean().default(true),
+    /**
+     * Who decides that a headline is adverse enough to close a position.
+     * "off" trusts the pattern matcher alone. "shadow" asks the model and logs
+     * the disagreement without acting. "enforce" lets a confident favourable or
+     * neutral verdict withdraw the flag. Scoped to held symbols, so it can only
+     * ever spare a position — never open one, never close one.
+     */
+    news_adjudication: z.enum(["off", "shadow", "enforce"]).default("enforce"),
     stale_position_enabled: z.boolean(),
     stale_min_hold_hours: z.number().min(0).max(168),
     stale_max_hold_days: z.number().min(1).max(30),

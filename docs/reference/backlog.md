@@ -180,3 +180,21 @@ missing this.
 The tractable version is to extend the EDGAR gatherer to 10-Q/10-K and extract
 the 10b5-1 disclosure block, then score it against the filer's holdings. That is
 real work and belongs after the operational tier passes.
+
+## 14. Adjudication lives in the gatherer because selectExits is synchronous
+
+`adjudicateAdverse` is wired into `news.ts` rather than `exits.ts` because
+`selectExits` is synchronous and part of the `Strategy` interface — making it
+async means changing the interface and the harness call site. The gatherer is
+the right chokepoint anyway, since `catalystInvalidatedAt` is where the verdict
+is recorded, but it means adjudication happens at ingest rather than at the
+moment of decision, and so is scoped by "is this symbol held right now" instead
+of "is an exit about to fire".
+
+The consequence is a small amount of wasted work: a held symbol's flagged
+headline is adjudicated even if the position closes on its target first. With a
+per-article cache and at most five positions that is a handful of calls.
+
+If `selectExits` becomes async, moving the call there would make it exact and
+would also let the positive catalyst path be adjudicated at the point of entry
+rather than at ingest.

@@ -16,6 +16,7 @@ import { createAlpacaProviders } from "../../../providers/alpaca";
 import type { MarketNewsItem } from "../../../providers/types";
 import type { Gatherer, StrategyContext } from "../../types";
 import { SOURCE_CONFIG } from "../config";
+import { adjudicateAdverse, adjudicationKey, MAX_ADJUDICATIONS_PER_PASS } from "../helpers/adjudicate";
 import { adverseCatalystReason, type CatalystHit, classifyCatalyst } from "../helpers/catalyst";
 import { detectSentiment } from "../helpers/sentiment";
 
@@ -161,6 +162,7 @@ async function gatherNews(ctx: StrategyContext): Promise<Signal[]> {
   // First collect adverse evidence, independently of API ordering. Remember its
   // publication watermark across passes so an old positive cannot reappear when
   // the adverse story drops out of the feed's shorter three-hour window.
+  const flagged: Array<{ symbol: string; at: number; reason: string; article: MarketNewsItem }> = [];
   for (const article of articles) {
     const symbol = singleIssuer(article);
     const createdAt = Date.parse(article.created_at);
@@ -169,8 +171,72 @@ async function gatherNews(ctx: StrategyContext): Promise<Signal[]> {
     if (!symbol || !isCurrent(at)) continue;
     const reason = adverseCatalystReason(`${article.headline} ${article.summary}`);
     if (!reason || at <= (invalidatedAt[symbol] ?? 0)) continue;
-    invalidatedAt[symbol] = at;
-    ctx.log("News", "catalyst_invalidated", { symbol, at, reason });
+    flagged.push({ symbol, at, reason, article });
+  }
+
+  // The pattern matcher reads vocabulary, and vocabulary is unbounded: three
+  // defects in one week were all a negative word describing a negative being
+  // removed. A model reads the event. It is consulted only for symbols actually
+  // held, because that is the only case where a false flag costs money — for a
+  // symbol not held, the flag merely blocks an entry, which costs opportunity,
+  // and an entry is protected by every gate downstream anyway. Held symbols are
+  // also already excluded from entry selection, so overturning a flag here can
+  // only spare a position. There is no path from a model reply to an order.
+  const mode = ctx.config.news_adjudication;
+  const judged = ctx.state.get<Record<string, { upheld: boolean; at: number }>>("adjudications") ?? {};
+  for (const [k, v] of Object.entries(judged)) if (now - v.at > maxAgeMs) delete judged[k];
+
+  if (mode !== "off" && flagged.length > 0) {
+    let held: Set<string>;
+    try {
+      held = new Set((await ctx.broker.getPositions()).map((p) => p.symbol.toUpperCase()));
+    } catch {
+      held = new Set();
+    }
+    const pending = flagged
+      .filter((f) => held.has(f.symbol) && judged[adjudicationKey(f.symbol, f.article.headline)] === undefined)
+      .slice(0, MAX_ADJUDICATIONS_PER_PASS);
+
+    // Concurrently, so the worst case for the pass is one request deadline
+    // rather than the sum of them.
+    const outcomes = await Promise.all(
+      pending.map((f) =>
+        adjudicateAdverse(ctx.llm, {
+          symbol: f.symbol,
+          headline: f.article.headline,
+          summary: f.article.summary,
+          matched: f.reason,
+        })
+      )
+    );
+    pending.forEach((f, i) => {
+      const outcome = outcomes[i]!;
+      judged[adjudicationKey(f.symbol, f.article.headline)] = { upheld: outcome.upheld, at: now };
+      ctx.log("News", "adjudicated", {
+        symbol: f.symbol,
+        matched: f.reason,
+        upheld: outcome.upheld,
+        note: outcome.note,
+        mode,
+        headline: f.article.headline.slice(0, 120),
+        quote: outcome.verdict?.quote?.slice(0, 120) ?? null,
+        event: outcome.verdict?.event ?? null,
+        reasoning: outcome.verdict?.reasoning?.slice(0, 200) ?? null,
+        // Shadow records what would have changed without changing it.
+        would_have_changed: !outcome.upheld,
+      });
+    });
+  }
+  ctx.state.set("adjudications", judged);
+
+  for (const f of flagged) {
+    const decided = judged[adjudicationKey(f.symbol, f.article.headline)];
+    if (mode === "enforce" && decided && !decided.upheld) {
+      ctx.log("News", "catalyst_invalidation_withdrawn", { symbol: f.symbol, reason: f.reason });
+      continue;
+    }
+    invalidatedAt[f.symbol] = f.at;
+    ctx.log("News", "catalyst_invalidated", { symbol: f.symbol, at: f.at, reason: f.reason });
   }
   for (const [symbol, hits] of Object.entries(catalystCache)) {
     const kept = hits.filter((hit) => hit.at > (invalidatedAt[symbol] ?? 0));
