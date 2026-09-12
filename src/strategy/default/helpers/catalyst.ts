@@ -85,6 +85,12 @@ const RULES: Rule[] = [
 
   // Medium — real, but the upside is capped or unproven.
   {
+    type: "regulatory",
+    quality: "medium",
+    pattern:
+      /\b(settl\w+|resolv\w+|dismiss\w+|wins? dismissal|clear\w+)\b.{0,50}\b(class action|lawsuit|litigation|investigation|probe|inquiry|antitrust|complaint|suit|case)\b/i,
+  },
+  {
     type: "m_and_a",
     quality: "medium",
     pattern:
@@ -126,7 +132,28 @@ const RULES: Rule[] = [
  * adverse event should be caught wherever it first appears.
  */
 const DISQUALIFYING =
-  /\b(dilut\w+|secondary offering|shelf offering|at[- ]the[- ]market offering|going concern|bankrupt\w*|chapter\s*11|delist\w+|investigation|subpoena|class action|fraud|restat\w+|resign\w+|steps? down|downgrad\w+|(cuts?|lowers?|reduces?|trims?|slashes|scales? back|walks? back|pulls?|suspends?|withdraws?)\s+(its\s+)?(full[- ]year\s+|fy\d*\s+|q\d\s+|quarterly\s+|annual\s+|revenue\s+|earnings\s+|profit\s+|sales\s+)?(guidance|outlook|forecast|target|estimates?|projections?)|(guidance|outlook|forecast)\s+(cut|lowered|reduced|withdrawn|suspended|pulled)|denied|denies|reject\w*|fail\w*|misses?|missed|unsuccessful|negative (results|data)|(warns?|warned|warning|cautions?|flags?)\s+.{0,40}\b(short|shortfall|below|miss|weak\w*|declin\w*|impact)|\b(revenue|sales|earnings|eps|results|profit)\b.{0,30}\b(fall short|falls short|below (expectations|estimates|consensus|guidance)|shortfall)|\b(miss|missing)\b.{0,25}\b(target|targets|guidance|estimates?|consensus|expectations)|material (adverse )?impact on\s+(\w+\s+){0,2}(revenue|earnings|results|sales|operations|production|guidance)|(production|supply|shipment|manufacturing)\s+(shortfall|disruption|halt|stoppage|outage)|(cyber\s*attack|cyberattack|ransomware|(cyber\s*security|security|data)\s+(incident|breach|intrusion|compromise))|complete response letter|clinical hold|terminat\w*|revok\w*|rescinds?|cancel\w*)\b|\b(not|never|no longer|no|without|didn't|doesn't|hasn't|wasn't|isn't|won't|can't)\b.{0,50}\b(approv\w*|clear\w*|grant\w*|meet|met|beat\w*|rais\w*|lift\w*|boost\w*|hike\w*|tops?|smash\w*|crush\w*|win\w*|won|secur\w*|receiv\w*|land\w*|award\w*|sign\w*|launch\w*|unveil\w*|introduc\w*|debut\w*|positive|success\w*|succeed\w*|partner\w*|acquir\w*|agre\w*|buy|merge\w*|announc\w*|form\w*|teams?)\b/i;
+  /\b(dilut\w+|secondary offering|shelf offering|at[- ]the[- ]market offering|going concern|bankrupt\w*|chapter\s*11|delist\w+|investigation|subpoena|class action|lawsuit|litigation|probe|inquiry|fraud|restat\w+|resign\w+|steps? down|downgrad\w+|(cuts?|lowers?|reduces?|trims?|slashes|scales? back|walks? back|pulls?|suspends?|withdraws?)\s+(its\s+)?(full[- ]year\s+|fy\d*\s+|q\d\s+|quarterly\s+|annual\s+|revenue\s+|earnings\s+|profit\s+|sales\s+)?(guidance|outlook|forecast|target|estimates?|projections?)|(guidance|outlook|forecast)\s+(cut|lowered|reduced|withdrawn|suspended|pulled)|denied|denies|reject\w*|fail\w*|misses?|missed|unsuccessful|negative (results|data)|(warns?|warned|warning|cautions?|flags?)\s+.{0,40}\b(short|shortfall|below|miss|weak\w*|declin\w*|impact)|\b(revenue|sales|earnings|eps|results|profit)\b.{0,30}\b(fall short|falls short|below (expectations|estimates|consensus|guidance)|shortfall)|\b(miss|missing)\b.{0,25}\b(target|targets|guidance|estimates?|consensus|expectations)|material (adverse )?impact on\s+(\w+\s+){0,2}(revenue|earnings|results|sales|operations|production|guidance)|(production|supply|shipment|manufacturing)\s+(shortfall|disruption|halt|stoppage|outage)|(cyber\s*attack|cyberattack|ransomware|(cyber\s*security|security|data)\s+(incident|breach|intrusion|compromise))|complete response letter|clinical hold|terminat\w*|revok\w*|rescinds?|cancel\w*)\b|\b(not|never|no longer|no|without|didn't|doesn't|hasn't|wasn't|isn't|won't|can't)\b.{0,50}\b(approv\w*|clear\w*|grant\w*|meet|met|beat\w*|rais\w*|lift\w*|boost\w*|hike\w*|tops?|smash\w*|crush\w*|win\w*|won|secur\w*|receiv\w*|land\w*|award\w*|sign\w*|launch\w*|unveil\w*|introduc\w*|debut\w*|positive|success\w*|succeed\w*|partner\w*|acquir\w*|agre\w*|buy|merge\w*|announc\w*|form\w*|teams?)\b/i;
+
+/**
+ * Legal and regulatory matters being resolved rather than opened.
+ *
+ * The adverse list matches nouns — investigation, class action, lawsuit — and a
+ * noun cannot say which direction the event runs. "Settles class action" and
+ * "faces class action" are opposite events sharing a phrase, and reading both
+ * as adverse means selling a position on the very news that removed its risk.
+ * Onset language is checked alongside, because a headline naming both a new
+ * case and an old settlement is not a clearance.
+ */
+const RESOLUTION =
+  /\b(settl\w+|resolv\w+|dismiss\w+|dropp?\w*|clear\w+|conclud\w+|finaliz\w+|wins? dismissal|throws? out)\b/i;
+const ONSET =
+  /\b(faces?|facing|new|opens?|opened|launch\w*|files?|filed|filing|hit with|accused|charged|widen\w*|expand\w*|escalat\w*)\b/i;
+
+/** True when an adverse-sounding matter is being cleared rather than started. */
+export function isResolution(text: string): boolean {
+  if (!text || typeof text !== "string") return false;
+  return RESOLUTION.test(text) && !ONSET.test(text);
+}
 
 // A scheduled binary event or prediction is not the event's favorable outcome.
 // Whole-headline rejection intentionally sacrifices coverage when the wording
@@ -151,7 +178,22 @@ export function classifyCatalyst(text: string): CatalystHit | null {
 /** Issuer-specific adverse evidence invalidates earlier cached favorable events. */
 export function adverseCatalystReason(text: string): string | null {
   if (!text || typeof text !== "string") return null;
-  return DISQUALIFYING.exec(text.replace(/[’‘]/g, "'"))?.[0].slice(0, 100) ?? null;
+  const normalised = text.replace(/[’‘]/g, "'");
+
+  // Every adverse match is considered, not just the first. "Settles lawsuit and
+  // announces a dilutive offering" would otherwise be cleared on the lawsuit and
+  // never reach the dilution — one headline can carry a resolved proceeding and
+  // a live problem at the same time.
+  const matches = [...normalised.matchAll(new RegExp(DISQUALIFYING.source, "gi"))].map((m) => m[0]);
+  if (!matches.length) return null;
+
+  // A proceeding being cleared is not the proceeding. The exemption is confined
+  // to pending-proceeding language: "settles" does not rescue a dilutive
+  // offering or a guidance cut, which are events in their own right.
+  const proceeding = /\b(investigation|subpoena|class action|lawsuit|litigation|probe|inquiry|complaint|suit)\b/i;
+  const resolved = isResolution(normalised);
+  const live = matches.find((m) => !(resolved && proceeding.test(m)));
+  return live ? live.slice(0, 100) : null;
 }
 
 /** True when `quality` is at least `minimum`. */

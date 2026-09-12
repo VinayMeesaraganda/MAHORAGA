@@ -1081,6 +1081,54 @@ rule has fired once, falsified if gap-captured exits underperform positions held
 to a level — which would mean gaps continue more often than they fade and the
 rule is cutting winners.
 
+## A cleared overhang read as a risk — September 12, 2026
+
+Traced against a third live trade: entered after litigation was settled, on the
+view that the threat was removed. The stock then ran from 579 to 650, +12.3%.
+
+The adverse list matches nouns — investigation, class action, lawsuit — and a
+noun cannot say which direction the event runs. "Settles class action" and
+"faces class action" are opposite events sharing a phrase, and both were read as
+adverse. For a held position that means selling on the very news that removed
+its risk, which is precisely the entry thesis inverted.
+
+Two defects, not one. Resolution was indistinguishable from onset, and
+`lawsuit`, `litigation`, `probe` and `inquiry` were absent from the adverse list
+entirely, so those went undetected in either direction.
+
+`isResolution` now requires clearing language and the absence of onset language,
+so a headline naming both a new case and an old settlement is not a clearance. A
+settled or dismissed proceeding is additionally classified as a `regulatory`
+catalyst at medium quality: it removes a risk rather than adding revenue, and
+usually at a price.
+
+The exemption is deliberately confined to pending proceedings. "Settles" does
+not rescue a dilutive offering or a guidance cut, which are events in their own
+right — and every adverse match is now considered rather than only the first,
+because "settles lawsuit and announces a dilutive secondary offering" would
+otherwise be cleared on the lawsuit and never reach the dilution.
+
+### What the system would have done with that trade
+
+At META's measured 3.30% ATR the stop would be 8.2% and the target 16.5%. The
+move from 579 to 650 is +12.3%, or 1.50R — short of the 2R target but exactly at
+the trail's arm point, so the trail would have armed and protected roughly
+three quarters of it. The exit taken on an overbought RSI reading landed close to
+where the mechanism would have, by a different route.
+
+RSI is deliberately not a gate. It is measured, shown to the model, and left out
+of the entry decision: extension and range position already exclude the stretched
+names, and adding RSI as a fourth correlated measure would cut trades without
+adding information.
+
+### What it would not have done
+
+A thesis such as cloud revenue or advertising growth playing out over quarters is
+not a catalyst and produces no entry here. That is a different strategy — a
+multi-quarter fundamental view — and the five-day hold and ATR stop are the wrong
+instruments for it. The system declines it correctly, but by omission rather than
+judgement.
+
 ## Diagnostics and reusable instructions
 
 ```bash

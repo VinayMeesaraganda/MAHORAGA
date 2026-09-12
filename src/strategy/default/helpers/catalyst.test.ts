@@ -167,3 +167,46 @@ describe("adverse detection against a real trade that went wrong", () => {
     }
   });
 });
+
+describe("a legal overhang clearing is not the overhang", () => {
+  // From a live trade: entered after litigation was settled, on the view that
+  // the threat was removed. The adverse list matched the noun "class action"
+  // and would have read that entry thesis as a reason to sell.
+  it("reads a settled or dismissed proceeding as favourable, not adverse", () => {
+    for (const h of [
+      "Meta settles antitrust class action, removing a major overhang",
+      "Meta reaches settlement resolving FTC investigation",
+      "Meta wins dismissal of shareholder lawsuit",
+      "Judge dismisses class action against Meta",
+      "Meta agrees to settle privacy litigation for $1.4 billion",
+    ]) {
+      expect(adverseCatalystReason(h), h).toBeNull();
+      expect(classifyCatalyst(h)?.type, h).toBe("regulatory");
+    }
+  });
+
+  it("still treats a proceeding being opened or widened as adverse", () => {
+    for (const h of [
+      "Meta faces new antitrust class action",
+      "SEC opens investigation into Meta",
+      "Meta hit with shareholder lawsuit over disclosures",
+      "Regulators widen probe into Meta advertising practices",
+    ]) {
+      expect(adverseCatalystReason(h), h).toBeTruthy();
+    }
+  });
+
+  it("does not let one resolution clear a separate live problem", () => {
+    // Every adverse match is considered, not just the first. Otherwise a
+    // settled lawsuit in the same sentence would clear a dilutive offering.
+    expect(adverseCatalystReason("Acme settles lawsuit and announces dilutive secondary offering")).toMatch(/dilut/i);
+    expect(adverseCatalystReason("Acme resolves probe but cuts full-year guidance")).toMatch(/guidance/i);
+    expect(adverseCatalystReason("Meta settles one case but faces a new SEC investigation")).toBeTruthy();
+  });
+
+  it("confines the exemption to proceedings", () => {
+    // "Settles" must not rescue events that are not pending proceedings.
+    expect(adverseCatalystReason("Acme settles on a dilutive secondary offering")).toBeTruthy();
+    expect(adverseCatalystReason("Acme resolves to withdraw guidance")).toBeTruthy();
+  });
+});

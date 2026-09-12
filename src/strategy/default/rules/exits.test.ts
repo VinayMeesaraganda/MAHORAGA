@@ -217,14 +217,20 @@ describe("gap capture", () => {
   it("leaves a gain below the threshold alone", () => {
     const ctx = context(cfg, { AAPL: entry13() });
     // +10% on a 13.4% stop is 0.75R — not enough to abandon the target.
-    expect(selectExits(ctx, [position({ current_price: 110, market_value: 1100, unrealized_pl: 100 })], account)).toEqual([]);
+    expect(
+      selectExits(ctx, [position({ current_price: 110, market_value: 1100, unrealized_pl: 100 })], account)
+    ).toEqual([]);
   });
 
   it("is disabled at zero and never fires on a loss", () => {
     const off = context({ ...cfg, gap_capture_r: 0 }, { AAPL: entry13() });
-    expect(selectExits(off, [position({ current_price: 115, market_value: 1150, unrealized_pl: 150 })], account)).toEqual([]);
+    expect(
+      selectExits(off, [position({ current_price: 115, market_value: 1150, unrealized_pl: 150 })], account)
+    ).toEqual([]);
     const losing = context(cfg, { AAPL: entry13() });
-    expect(selectExits(losing, [position({ current_price: 96, market_value: 960, unrealized_pl: -40 })], account)).toEqual([]);
+    expect(
+      selectExits(losing, [position({ current_price: 96, market_value: 960, unrealized_pl: -40 })], account)
+    ).toEqual([]);
   });
 
   it("does not pre-empt a genuine target hit", () => {
