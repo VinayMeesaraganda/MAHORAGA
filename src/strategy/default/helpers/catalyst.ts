@@ -155,6 +155,33 @@ export function isResolution(text: string): boolean {
   return RESOLUTION.test(text) && !ONSET.test(text);
 }
 
+// Cancelling something is adverse only when the thing cancelled was good. A
+// terminated contract is a loss; a terminated share-sale plan is the removal of
+// supply. `cancel\w*` and `terminat\w*` sit bare in the disqualifying list, so
+// without this an insider calling off a scheduled sale — unambiguously welcome
+// news — reads as an adverse event and would close a held position on it. Same
+// defect as reading a settled case as a pending one, in different clothes.
+const CANCELLATION =
+  /\b(cancel\w*|terminat\w*|revok\w*|rescinds?|scraps?|scrapped|abandons?|abandoned|calls? off|called off|shelv\w*)\b/i;
+/** Plans whose cancellation removes an overhang instead of creating one. */
+const UNWELCOME_PLAN =
+  /\b((share|stock|equity)\s+sale|sale of (his|her|their|the)\s+(shares?|stake|holdings?)|(plans?|planned|scheduled)\s+(to\s+)?sell|10b5-1|(secondary|share|stock|follow[- ]on)\s+offering|layoffs?|job cuts?|redundanc\w+)\b/i;
+
+// The plan must attach to the cancelling verb, not merely share a sentence with
+// it. Only determiners and adjectives may intervene: "cancels the planned
+// secondary offering" qualifies, "cancels a contract and announces a secondary
+// offering" must not, because there the offering is still happening.
+const ATTACHED = new RegExp(
+  `${CANCELLATION.source}(\\s+(its|his|her|their|the|a|an|all|any|further|remaining|previously|planned|proposed|scheduled|upcoming|pending|announced))*\\s+(?:${UNWELCOME_PLAN.source.replace(/^\\b|\\b$/g, "")})`,
+  "i"
+);
+
+/** True when the headline calls off something the market did not want. */
+export function cancelsAnOverhang(text: string): boolean {
+  if (!text || typeof text !== "string") return false;
+  return ATTACHED.test(text);
+}
+
 // A scheduled binary event or prediction is not the event's favorable outcome.
 // Whole-headline rejection intentionally sacrifices coverage when the wording
 // mixes an actual event with unresolved event risk.
@@ -192,7 +219,16 @@ export function adverseCatalystReason(text: string): string | null {
   // offering or a guidance cut, which are events in their own right.
   const proceeding = /\b(investigation|subpoena|class action|lawsuit|litigation|probe|inquiry|complaint|suit)\b/i;
   const resolved = isResolution(normalised);
-  const live = matches.find((m) => !(resolved && proceeding.test(m)));
+  // Each exemption is scoped to the matches it can legitimately excuse, so a
+  // headline carrying both a cancelled share sale and a guidance cut still
+  // reports the guidance cut.
+  // Both the cancelling verb and the cancelled plan are excused, since
+  // "secondary offering" and "layoffs" are independently disqualifying and would
+  // otherwise survive the exemption that was meant to clear them.
+  const cancelled = cancelsAnOverhang(normalised);
+  const live = matches.find(
+    (m) => !(resolved && proceeding.test(m)) && !(cancelled && (CANCELLATION.test(m) || UNWELCOME_PLAN.test(m)))
+  );
   return live ? live.slice(0, 100) : null;
 }
 

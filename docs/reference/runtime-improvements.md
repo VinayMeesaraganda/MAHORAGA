@@ -1246,3 +1246,44 @@ instead. `src/core/order-path.test.ts` locks the invariant: the harness must
 contain no direct broker call, and every MCP order path must have a matching
 `PolicyEngine` evaluation and approval token. The MCP paths were checked and are
 correctly gated — preview, evaluate, mint, validate, place.
+
+## Oracle, and cancelling something unwelcome
+
+A worked example: ORCL reported FY27 Q1 after the close on 2026-09-10, beating
+at $1.92 against $1.67. On 11 September it opened at 164.43 against a 152.94
+previous close, touched 166.00, and closed at 150.28 — down on the day and 9.5%
+off the high, on 80.4M shares against a 24.0M average. A 15% beat that was sold.
+
+The system would not have been anywhere near it, and not by luck. Three
+independent gates reject it: extension was 7.51% at the open against a 7% limit,
+range position closed at 0.027 against a 0.5 minimum, and ORCL sat at 45.4% of
+its 52-week high — 331.00, set on 2026-09-11 — against a 70% floor. The 52-week
+gate is doing exactly the work it was added for: a beat inside a year-long
+decline is not the same event as a beat inside an uptrend, and the gate does not
+need to know why to decline it. Had the open somehow been bought, the day would
+have closed at -0.72R.
+
+The second half of the example found a live defect. `cancel\w*` and
+`terminat\w*` sat bare in the disqualifying list, so "Larry Ellison cancels plan
+to sell Oracle shares" classified as ADVERSE on the word "cancels". An insider
+calling off a scheduled sale is the removal of supply; read this way, the system
+would have closed a held position on unambiguously welcome news. This is the
+same defect as reading a settled case as a pending one, which `isResolution`
+already fixed for legal matters — the class recurred in different vocabulary.
+
+The first attempt was too loose and a test caught it. Exempting any headline
+containing both a cancellation word and an unwelcome plan would also clear
+"cancels a supply contract and announces a secondary offering", where the
+offering is still happening. The plan must attach to the cancelling verb, with
+only determiners and adjectives intervening. Both the verb and the cancelled
+object are exempted, because "secondary offering" and "layoffs" are
+independently disqualifying and would otherwise survive the exemption meant to
+clear them.
+
+Not changed: no insider catalyst was added for headlines. `insider` is a
+declared type but is emitted only by the Form 4 gatherer, which reads verified
+filings rather than press wording — the stronger source. A cancelled sale
+produces no Form 4 at all, since no transaction occurs, so this event is
+invisible to that path by nature. Making it an entry catalyst would mean new
+entry surface justified by nothing measured, and the `UNCONFIRMED` filter would
+reject most such wording anyway on the word "plan".

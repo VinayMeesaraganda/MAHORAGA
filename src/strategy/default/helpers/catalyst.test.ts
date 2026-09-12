@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adverseCatalystReason, bestCatalyst, classifyCatalyst, meetsQuality } from "./catalyst";
+import { adverseCatalystReason, bestCatalyst, cancelsAnOverhang, classifyCatalyst, meetsQuality } from "./catalyst";
 
 describe("classifyCatalyst", () => {
   it("grades events that change forward estimates as high", () => {
@@ -208,5 +208,55 @@ describe("a legal overhang clearing is not the overhang", () => {
     // "Settles" must not rescue events that are not pending proceedings.
     expect(adverseCatalystReason("Acme settles on a dilutive secondary offering")).toBeTruthy();
     expect(adverseCatalystReason("Acme resolves to withdraw guidance")).toBeTruthy();
+  });
+});
+
+describe("calling off something unwelcome is not an adverse event", () => {
+  // Oracle, Sept 2026: an insider cancelling a scheduled sale is the removal of
+  // supply. Read as adverse, it would have closed a held position on good news.
+  const welcome = [
+    "Larry Ellison cancels plan to sell Oracle shares",
+    "Oracle chairman terminates scheduled share sale program",
+    "Ellison revokes 10b5-1 plan covering Oracle stock",
+    "Company cancels planned secondary offering after strong quarter",
+    "Acme rescinds layoffs as demand recovers",
+  ];
+  for (const headline of welcome) {
+    it(`does not flag: ${headline}`, () => {
+      expect(adverseCatalystReason(headline)).toBeNull();
+    });
+  }
+
+  // The exemption must not become a blanket pardon for the word "cancel".
+  const genuinelyBad: Array<[string, string]> = [
+    ["Acme cancels its largest customer contract", "cancel"],
+    ["Regulator revokes Acme's operating licence", "revok"],
+    ["Acme terminates its merger agreement", "terminat"],
+    ["Partner cancels the supply agreement with Acme", "cancel"],
+  ];
+  for (const [headline, fragment] of genuinelyBad) {
+    it(`still flags: ${headline}`, () => {
+      expect(adverseCatalystReason(headline)?.toLowerCase()).toContain(fragment);
+    });
+  }
+
+  it("a cancelled share sale does not rescue a guidance cut in the same headline", () => {
+    const a = adverseCatalystReason("Ellison cancels share sale but Oracle cuts full-year guidance");
+    expect(a).not.toBeNull();
+    expect(a?.toLowerCase()).toContain("guidance");
+  });
+
+  it("a cancellation elsewhere in the sentence does not clear a live offering", () => {
+    // The offering is still happening; only the contract was cancelled. An
+    // exemption keyed on both words merely appearing would have cleared this.
+    const a = adverseCatalystReason("Acme cancels supply contract and announces a secondary offering");
+    expect(a).not.toBeNull();
+    expect(cancelsAnOverhang("Acme cancels supply contract and announces a secondary offering")).toBe(false);
+  });
+
+  it("cancelsAnOverhang needs the plan to attach to the cancelling verb", () => {
+    expect(cancelsAnOverhang("Ellison cancels plan to sell shares")).toBe(true);
+    expect(cancelsAnOverhang("Acme cancels supply contract")).toBe(false);
+    expect(cancelsAnOverhang("Insider completes scheduled share sale")).toBe(false);
   });
 });
