@@ -32,7 +32,8 @@ Website references: https://mahoraga.dev/ and https://sukuna.dev/ . The user sup
 - Read-only Alpaca checks: ACTIVE, $100,000 cash/equity, zero positions and zero open orders. No orders submitted.
 - `config/paper-baseline.json` is the reusable configuration patch; `.dev.vars`, `agent-config.json`, and `wrangler.jsonc` are ignored local files.
 - Local worker and dashboard started at http://127.0.0.1:8787 and http://127.0.0.1:3000. Profile applied and read back; emergency stop tested; agent confirmed disabled.
-- OpenAI key remains blank. No Cloudflare resources provisioned, no cloud deployment, no public fork or leaderboard registration created.
+- Cloudflare paper resources are provisioned: D1 database `mahoraga-paper-db`, a dedicated KV namespace, and Worker `mahoraga-paper`. The Worker runs at `https://mahoraga-paper.raj-vinay2408.workers.dev` with paper-only mode, equities-only policy, the applied baseline profile, and its harness enabled. Its broker readback at deployment showed an ACTIVE $100,000 paper account, zero positions and zero pending orders. Provider, broker, API and emergency-stop secrets were stored as Cloudflare secrets; their values are not in the repository.
+- R2 was not enabled on the Cloudflare account. The application does not currently call its R2 client, so the unused R2 deployment binding was removed. No public fork or leaderboard registration was created.
 - Emergency route corrected and covered by four regression tests. Worker typecheck, 214 tests, and dashboard production build pass.
 
 Run commands from the repository root. Do not put API credentials in tracked files or documentation.

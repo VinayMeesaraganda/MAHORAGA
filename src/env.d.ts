@@ -1,7 +1,6 @@
 export interface Env {
   DB: D1Database;
   CACHE: KVNamespace;
-  ARTIFACTS: R2Bucket;
   SESSION: DurableObjectNamespace;
   MAHORAGA_HARNESS?: DurableObjectNamespace;
 
