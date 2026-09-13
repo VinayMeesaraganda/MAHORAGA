@@ -50,7 +50,7 @@ const research: MarketContext = {
 const config = {
   ...DEFAULT_CONFIG,
   entry_max_spread_bps: 30,
-  entry_min_rel_volume: 1.5,
+  entry_min_rel_volume: 0,
   entry_min_range_position: 0.5,
   entry_min_pct_of_52w_high: 75,
   stop_atr_multiple: 2.5,
@@ -70,7 +70,7 @@ describe("fresh execution market", () => {
         sma_20: 99,
         sma_50: 97,
         range_position: 0.5,
-        rel_volume: 2,
+        rel_volume: null,
       })
     );
     expect(result.market?.spread_bps).toBeCloseTo(4, 5);
@@ -163,9 +163,9 @@ describe("fresh execution market", () => {
     }
   });
 
-  it("treats zero minute volume as measured zero participation", () => {
+  it("leaves relative volume unknown without a matching denominator, including zero-volume minutes", () => {
     const s = { ...snapshot, minute_bar: { ...snapshot.minute_bar, v: 0, n: 0 } };
-    expect(check(s).rejection).toMatch(/Relative volume 0.0x below/);
+    expect(freshEntryMarket(s, research, { ...config, entry_min_rel_volume: 1.5 }, now).rejection).toMatch(/Required relative volume unknown/);
     expect(freshEntryMarket(s, research, { ...config, entry_min_rel_volume: 0 }, now).rejection).toBeNull();
   });
 

@@ -53,6 +53,16 @@ export interface PendingExecution {
   order_id?: string;
   status: string;
   expected_qty?: number;
+  entry_basis?: number;
+  protected_entry?: {
+    stop: number;
+    limit: number;
+    expires_at: number;
+    protective_order_id?: string;
+    protective_order_ids?: string[];
+    protective_client_id?: string;
+    closing_reason?: string;
+  };
 }
 
 export interface PositionEntry {

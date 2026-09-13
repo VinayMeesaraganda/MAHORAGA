@@ -109,7 +109,7 @@ describe("red flag severity", () => {
 });
 
 describe("market quality gate", () => {
-  const check = (m: Partial<MarketContext>) => marketQualityRejection({ ...market, ...m }, DEFAULT_CONFIG);
+  const check = (m: Partial<MarketContext>) => marketQualityRejection({ ...market, ...m }, { ...DEFAULT_CONFIG, entry_min_rel_volume: 1 });
   it("passes a liquid, un-extended name", () => expect(check({})).toBeNull());
   it("rejects sub-threshold price and thin liquidity", () => {
     expect(check({ price: 1.2 })).toMatch(/below minimum/);

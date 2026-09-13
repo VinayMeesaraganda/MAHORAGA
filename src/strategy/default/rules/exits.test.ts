@@ -51,6 +51,21 @@ function context(config: Partial<typeof DEFAULT_CONFIG>, entries: Record<string,
 }
 
 describe("equity exits", () => {
+  it("services a breached stop without requesting news adjudication", () => {
+    const ctx = context({ exit_on_adverse_news: true }, { AAPL: entry() });
+    ctx.state.set("catalystInvalidatedAt", { AAPL: Date.now() - 1000 });
+    expect(
+      selectExits(ctx, [position({ current_price: 90, market_value: 900, unrealized_pl: -100 })], account)[0]?.reason
+    ).toMatch(/^Stop loss/);
+  });
+  it("services an overdue time exit without requesting news adjudication", () => {
+    const ctx = context(
+      { exit_on_adverse_news: true, max_hold_days: 5 },
+      { AAPL: entry({ entry_time: Date.now() - 6 * 24 * HOUR }) }
+    );
+    ctx.state.set("catalystInvalidatedAt", { AAPL: Date.now() - 1000 });
+    expect(selectExits(ctx, [position()], account)[0]?.reason).toMatch(/^Time stop/);
+  });
   it("backfills entry price and peak from the broker position", () => {
     const entries = { AAPL: entry({ entry_price: 0, peak_price: 0 }) };
     const ctx = context({}, entries);

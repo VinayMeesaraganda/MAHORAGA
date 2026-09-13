@@ -59,6 +59,15 @@ export interface StrategyContext {
     reconcile?(): Promise<void>;
     /** Execute a buy. Returns true if the order was submitted. */
     buy(symbol: string, notional: number, reason: string): Promise<boolean>;
+    /** Quantity/limit entry with broker protection. Requires separately installed pilot validation. */
+    buyProtected?: (intent: {
+      symbol: string;
+      quantity: number;
+      limit: number;
+      stop: number;
+      expiresAt: number;
+      reason: string;
+    }) => Promise<boolean>;
     /** Close a position. Returns true if the close was submitted. */
     sell(symbol: string, reason: string): Promise<boolean>;
   };

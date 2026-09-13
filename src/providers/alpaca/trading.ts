@@ -199,6 +199,8 @@ export class AlpacaTradingProvider implements BrokerProvider {
     if (params.client_order_id !== undefined) {
       body.client_order_id = params.client_order_id;
     }
+    if (params.order_class !== undefined) body.order_class = params.order_class;
+    if (params.stop_loss !== undefined) body.stop_loss = { stop_price: String(params.stop_loss.stop_price) };
 
     return this.client.tradingRequest<Order>("POST", "/v2/orders", body);
   }

@@ -36,7 +36,7 @@ describe("deriveMarketContext", () => {
     expect(m.gap_pct).toBeCloseTo(1, 5); // 101 open vs 100 previous close
     expect(m.extension_pct).toBeCloseTo(2, 5); // 102 now vs 100 previous close
     expect(m.range_position).toBeCloseTo(0.6, 5); // (102-100.5)/(103-100.5)
-    expect(m.rel_volume).toBeCloseTo(1.95, 2); // 3900 vs 780000/390
+    expect(m.rel_volume).toBeNull(); // no same-time historical denominator in a snapshot
     expect(m.dollar_volume).toBeCloseTo(780_000 * 99.5, 5);
     expect(m.spread_bps).toBeCloseTo(9.8, 1);
   });
@@ -68,7 +68,7 @@ describe("deriveMarketContext", () => {
 
   it("describes missing context as unknown for the prompt", () => {
     expect(describeMarketContext(null)).toMatch(/unknown/);
-    expect(describeMarketContext(deriveMarketContext(snapshot))).toMatch(/Relative volume right now: 1\.9x normal/);
+    expect(describeMarketContext(deriveMarketContext(snapshot))).toMatch(/Relative volume right now: unknown/);
   });
 });
 

@@ -2,6 +2,8 @@
 
 This document supersedes the initial runtime findings where noted.
 
+September 13 follow-up: the [guidance-continuation implementation status](guidance-continuation-status.md) records the current shadow workflow, corrected volume inputs, mandatory-exit ordering and broker-fill loss accounting. It supersedes older descriptions of those behaviors below. The challenger remains disabled for broker orders; its remaining data and execution prerequisites are explicit there.
+
 ## Active paper profile
 
 `config/paper-baseline.json` retains $2,500 per position, five positions, 5% cash sizing, 5% stop loss, 10% profit target and equities only. Preparation begins ten minutes before the Alpaca-reported open. Data polling is two minutes and analyst/signal-research cadence is five minutes. Staleness exits are disabled pending dependable source history; deterministic stop/profit exits remain enabled.

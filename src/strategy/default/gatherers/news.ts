@@ -85,11 +85,15 @@ async function gatherNews(ctx: StrategyContext): Promise<Signal[]> {
   const sourceWeight = SOURCE_CONFIG.weights.alpaca_news;
   const maxAgeMs = Math.max(1, ctx.config.entry_max_catalyst_age_minutes) * 60_000;
   const isCurrent = (at: number) => Number.isFinite(at) && at <= now && now - at <= maxAgeMs;
+  const affectsHolding = (symbol: string, at: number) => {
+    const held = ctx.positionEntries?.[symbol];
+    return !!held && Number.isFinite(at) && at > held.entry_time && at <= now;
+  };
   const evidenceCurrent = ctx.state.get<number>("catalystEvidenceVersion") === CATALYST_EVIDENCE_VERSION;
   const existing = evidenceCurrent ? (ctx.state.get<Record<string, CachedCatalyst[]>>("catalystCache") ?? {}) : {};
   const invalidatedAt: Record<string, number> = {};
   for (const [symbol, at] of Object.entries(ctx.state.get<Record<string, number>>("catalystInvalidatedAt") ?? {})) {
-    if (isCurrent(at)) invalidatedAt[symbol] = at;
+    if (isCurrent(at) || affectsHolding(symbol, at)) invalidatedAt[symbol] = at;
   }
   const catalystCache: Record<string, CachedCatalyst[]> = {};
   for (const [symbol, hits] of Object.entries(existing)) {
@@ -103,12 +107,21 @@ async function gatherNews(ctx: StrategyContext): Promise<Signal[]> {
   ctx.state.set("catalystEvidenceVersion", CATALYST_EVIDENCE_VERSION);
 
   let articles: MarketNewsItem[];
+  const cursor = ctx.state.get<number>("newsThrough");
+  const from =
+    typeof cursor === "number" && Number.isFinite(cursor) && cursor <= now
+      ? Math.min(cursor - 300_000, now - LOOKBACK_MINUTES * 60_000)
+      : now - 7 * 86_400_000;
   try {
     articles = await alpaca.marketData.getNews({
-      start: new Date(now - LOOKBACK_MINUTES * 60_000).toISOString(),
+      start: new Date(from).toISOString(),
+      end: new Date(now).toISOString(),
       limit: 50,
     });
+    ctx.state.set("newsThrough", now);
+    ctx.state.set("newsCoverage", { complete: true, from, through: now });
   } catch (error) {
+    ctx.state.set("newsCoverage", { complete: false, from, through: cursor ?? null });
     ctx.log("News", "fetch_failed", { error: String(error) });
     return [];
   }
@@ -168,7 +181,7 @@ async function gatherNews(ctx: StrategyContext): Promise<Signal[]> {
     const createdAt = Date.parse(article.created_at);
     const updatedAt = Date.parse(article.updated_at);
     const at = Number.isFinite(updatedAt) && updatedAt <= now ? Math.max(createdAt, updatedAt) : createdAt;
-    if (!symbol || !isCurrent(at)) continue;
+    if (!symbol || !(isCurrent(at) || affectsHolding(symbol, at))) continue;
     const reason = adverseCatalystReason(`${article.headline} ${article.summary}`);
     if (!reason || at <= (invalidatedAt[symbol] ?? 0)) continue;
     flagged.push({ symbol, at, reason, article });
@@ -181,7 +194,8 @@ async function gatherNews(ctx: StrategyContext): Promise<Signal[]> {
   // in the harness, at the moment an exit is about to fire, where the model and
   // a real deadline both exist.
   const evidence = ctx.state.get<Record<string, AdverseEvidence>>("adverseEvidence") ?? {};
-  for (const [symbol, e] of Object.entries(evidence)) if (!isCurrent(e.at)) delete evidence[symbol];
+  for (const [symbol, e] of Object.entries(evidence))
+    if (!isCurrent(e.at) && !affectsHolding(symbol, e.at)) delete evidence[symbol];
 
   for (const f of flagged) {
     invalidatedAt[f.symbol] = f.at;

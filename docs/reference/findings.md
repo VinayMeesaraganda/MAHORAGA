@@ -1,5 +1,17 @@
 # Review findings and verification
 
+## September 12 implementation update
+
+The sections below include historical observations. [Guidance-continuation implementation status](guidance-continuation-status.md) is the current record of this change.
+
+- The snapshot-based relative-volume denominator and most-actives conviction multiplier have been removed. Snapshot relative volume remains unknown; the corrected profile disables that gate. A tested same-cutoff/same-feed helper is available when suitable history exists.
+- News retrieval now paginates and reports incomplete coverage. The separate research ledger persists article revisions and resumable coverage cursors. Held-issuer adverse evidence can survive beyond entry-catalyst age limits.
+- Mandatory stop/time exits precede news adjudication; the baseline target/trailing branches remain available.
+- Autonomous sell-order reconciliation now records idempotent cumulative fill deltas and updates the legacy gross-loss counter/cooldown. The New York date rollover preserves an unexpired cooldown. This does not backfill external trades or replace broker equity checks. Partial-fill day attribution uses broker order update time when a final fill time is unavailable.
+- Entry prompts no longer contain recent win/loss aggregates. The review command produces exploratory statistics without promotion verdicts; outcome-selected exit groups cannot establish causal benefits.
+- A separate `guidance-continuation-v1` shadow pipeline records unknown revenue consensus explicitly. Its optional protected-order contract is not wired into the production strategy. No pilot or profitability claim follows from passing tests.
+- The legacy journal still contains decision-price P&L marks. Use broker fills for fill accounting; do not treat old journal marks as net realized performance. Historical journal reconciliation and external-trade attribution remain pilot prerequisites.
+
 ## Fixed in this checkout
 
 **Emergency stop could not use its documented separate token.** `src/index.ts` required the regular token for all `/agent/*` paths, while the harness required a different token for `/kill`. The router now accepts the emergency token only on the exact kill path and bypasses normal rate limiting there. Four regression tests verify forwarding under exhausted rate limits, rejection of normal/incorrect tokens, no emergency-token access to normal actions, and preserved normal rate limiting.
@@ -80,6 +92,8 @@ five-day hold, the trail arming at 1.5R and gap capture at 1.5R between them
 ensure that almost nothing runs to 2R, so the advertised risk-reward is not the
 realised one. The entire ladder is worth +0.005R per trade against a plain
 stop/target/time exit, which on this sample is nothing.
+
+Review clarification: both compared policies retain a target. This comparison does not establish the effect of deleting the target, and a small mean difference alone is not a statistical equivalence result.
 
 These are unconditional entries, not catalyst-selected ones, and the intrabar
 assumption is pessimistic (the adverse extreme is assumed to be reached first).

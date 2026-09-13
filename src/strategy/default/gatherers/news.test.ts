@@ -46,6 +46,25 @@ function context(initial: Record<string, unknown> = {}) {
 }
 
 describe("issuer-specific news evidence", () => {
+  it("keeps a material overnight item for an existing holding even after entry-catalyst expiry", async () => {
+    const { ctx, data } = context();
+    ctx.positionEntries = {
+      ACME: {
+        symbol: "ACME",
+        entry_time: NOW - 4 * 86_400_000,
+        entry_price: 100,
+        entry_sentiment: 0,
+        entry_social_volume: 0,
+        entry_sources: [],
+        entry_reason: "test",
+        peak_price: 100,
+        peak_sentiment: 0,
+      },
+    };
+    getNews.mockResolvedValue([article("Acme withdraws its revenue guidance", ["ACME"], 2 * 24 * 60)]);
+    await newsGatherer.gather(ctx);
+    expect(data.get("catalystInvalidatedAt")).toMatchObject({ ACME: NOW - 2 * 86_400_000 });
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);

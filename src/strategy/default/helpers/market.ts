@@ -13,8 +13,6 @@ import type { MarketContext } from "../../../core/types";
 import { calculateATR, calculateRSI, calculateSMA } from "../../../providers/technicals";
 import type { Bar, Snapshot } from "../../../providers/types";
 
-const MINUTES_PER_SESSION = 390;
-
 function finitePositive(value: number | undefined): number | null {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
@@ -47,7 +45,6 @@ export function deriveMarketContext(snapshot: Snapshot | null | undefined): Mark
   const dayOpen = finitePositive(snapshot.daily_bar?.o);
   const dayHigh = finitePositive(snapshot.daily_bar?.h);
   const dayLow = finitePositive(snapshot.daily_bar?.l);
-  const minuteVolume = snapshot.minute_bar?.v;
 
   return {
     price,
@@ -61,11 +58,8 @@ export function deriveMarketContext(snapshot: Snapshot | null | undefined): Mark
       dayHigh !== null && dayLow !== null && dayHigh > dayLow
         ? Math.min(1, Math.max(0, (price - dayLow) / (dayHigh - dayLow)))
         : null,
-    /** Current minute's volume against the previous session's per-minute average. */
-    rel_volume:
-      prevVolume !== null && typeof minuteVolume === "number" && Number.isFinite(minuteVolume) && minuteVolume >= 0
-        ? minuteVolume / (prevVolume / MINUTES_PER_SESSION)
-        : null,
+    /** A snapshot has no same-time historical denominator. Never substitute a full-day average. */
+    rel_volume: null,
     /** Previous session's traded dollars — the liquidity floor that matters for exits. */
     dollar_volume: prevVolume !== null && prevVwap !== null ? prevVolume * prevVwap : null,
     spread_bps: mid !== null && bid !== null && ask !== null ? ((ask - bid) / mid) * 10_000 : null,

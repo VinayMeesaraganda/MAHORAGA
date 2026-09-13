@@ -23,7 +23,6 @@ const TOP_N = 40;
 const FULL_STRENGTH_MOVE_PCT = 5;
 /** Above this the move is already made — the entry gates would reject it anyway. */
 const MAX_USEFUL_EXTENSION_PCT = 15;
-const MINUTES_PER_SESSION = 390;
 
 async function gatherMostActives(ctx: StrategyContext): Promise<Signal[]> {
   const now = Date.now();
@@ -81,25 +80,16 @@ async function gatherMostActives(ctx: StrategyContext): Promise<Signal[]> {
 
     const rawSentiment = Math.min(1, changePct / FULL_STRENGTH_MOVE_PCT);
 
-    const prevVolume = snap?.prev_daily_bar?.v;
-    const minuteVolume = snap?.minute_bar?.v;
-    const relVolume =
-      prevVolume && prevVolume > 0 && typeof minuteVolume === "number"
-        ? minuteVolume / (prevVolume / MINUTES_PER_SESSION)
-        : 1;
-    // Participation scales conviction but cannot manufacture it.
-    const conviction = Math.max(0.5, Math.min(1.5, relVolume / 2));
-
     signals.push({
       symbol,
       source: "alpaca_most_actives",
       source_detail: "screener",
-      sentiment: rawSentiment * sourceWeight * conviction,
+      sentiment: rawSentiment * sourceWeight,
       raw_sentiment: rawSentiment,
       volume: active.trade_count > 0 ? active.trade_count : 1,
       freshness: 1,
       source_weight: sourceWeight,
-      reason: `Most active: +${changePct.toFixed(1)}% on ${(active.volume / 1e6).toFixed(1)}M shares, ${relVolume.toFixed(1)}x normal`,
+      reason: `Most active: +${changePct.toFixed(1)}% on ${(active.volume / 1e6).toFixed(1)}M shares; same-time relative volume unknown`,
       timestamp: now,
       price,
     });

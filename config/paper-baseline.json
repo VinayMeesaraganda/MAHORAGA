@@ -27,7 +27,7 @@
   "entry_min_dollar_volume": 25000000,
   "entry_max_spread_bps": 30,
   "entry_max_extension_pct": 7,
-  "entry_min_rel_volume": 1.5,
+  "entry_min_rel_volume": 0,
   "entry_max_red_flags": 2,
   "reentry_cooldown_minutes": 120,
   "risk_per_trade_pct": 0.25,
@@ -47,5 +47,5 @@
   "trailing_stop_r": 1.0,
   "exit_on_adverse_news": true,
   "news_adjudication": "enforce",
-  "gap_capture_r": 1.5
+  "gap_capture_r": 0
 }

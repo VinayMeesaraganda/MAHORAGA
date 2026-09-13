@@ -18,9 +18,20 @@ import type { Account, MarketClock, Order, Position } from "../providers/types";
 import type { D1Client } from "../storage/d1/client";
 import type { RiskState } from "../storage/d1/queries/risk-state";
 import { getRiskState } from "../storage/d1/queries/risk-state";
+import { recordOrderLoss } from "../storage/d1/queries/fill-loss";
 import { isCryptoSymbol, normalizeCryptoSymbol } from "../strategy/default/helpers/crypto";
 import type { StrategyContext } from "../strategy/types";
 import type { PendingExecution } from "./types";
+import { confirmedProtection, entryReservationPending } from "./protection";
+
+export interface ProtectedBuy {
+  symbol: string;
+  quantity: number;
+  limit: number;
+  stop: number;
+  expiresAt: number;
+  reason: string;
+}
 
 export interface PolicyBrokerDeps {
   alpaca: AlpacaProviders;
@@ -43,6 +54,8 @@ export interface PolicyBrokerDeps {
   onBuy?: (symbol: string, notional: number) => void;
   /** Called only after a terminal close order and broker-confirmed zero holding. */
   onSell?: (symbol: string, reason: string) => void;
+  /** Deliberately absent in the production harness until paper lifecycle acceptance. */
+  validateProtectedEntry?: (intent: ProtectedBuy, account: Account, positions: Position[]) => Promise<string | null>;
 }
 
 /**
@@ -62,6 +75,8 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
   const pendingExecutions = deps.pendingExecutions ?? {};
   const terminal = new Set(["filled", "canceled", "expired", "rejected"]);
   const persist = () => deps.persist?.() ?? Promise.resolve();
+  const hasOpeningIntent = () => Object.values(pendingExecutions).some(entryReservationPending);
+  const placeOrder = (params: Parameters<typeof alpaca.trading.createOrder>[0]) => alpaca.trading.createOrder(params);
   const definitiveRejection = (error: unknown) =>
     ["UNAUTHORIZED", "FORBIDDEN", "INVALID_INPUT", "RATE_LIMITED", "NOT_FOUND"].includes(
       (error as { code?: string })?.code ?? ""
@@ -100,6 +115,14 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
         if (!order || order.symbol !== symbol || order.side !== intent.side) continue;
         intent.order_id = order.id;
         intent.status = order.status;
+        if (intent.protected_entry) {
+          await reconcileProtected(symbol, intent, order);
+          await persist();
+          continue;
+        }
+        if (intent.side === "sell" && Number(order.filled_qty) > 0 && db) {
+          await recordOrderLoss(db, order, intent.entry_basis ?? Number.NaN, policyConfig.cooldown_minutes_after_loss);
+        }
         if (terminal.has(order.status)) {
           const positions = await alpaca.trading.getPositions();
           const matching = positions.filter((p) => p.symbol === symbol);
@@ -127,6 +150,128 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
         log("PolicyBroker", "reconciliation_pending", { symbol, error: String(error) });
       }
     }
+  }
+
+  async function reconcileProtected(symbol: string, intent: PendingExecution, parent: Order): Promise<void> {
+    const protection = intent.protected_entry!;
+    const positions = await alpaca.trading.getPositions();
+    const held = positions.find((p) => p.symbol === symbol && p.qty !== 0);
+    if (held && (!Number.isFinite(held.qty) || held.qty <= 0 || held.side !== "long"))
+      throw new Error("Unexpected protected holding");
+    const parentQty = Number(parent.filled_qty);
+    if (
+      typeof parent.filled_qty !== "string" ||
+      !parent.filled_qty.trim() ||
+      !Number.isFinite(parentQty) ||
+      parentQty < 0 ||
+      (parent.status === "filled" && parentQty === 0) ||
+      (intent.expected_qty !== undefined && parentQty > intent.expected_qty)
+    )
+      throw new Error("Invalid parent fills");
+    // Resolve all children before replacing protection or liquidating. Unknown outcomes stay blocked.
+    const siblings = await alpaca.trading.listOrders({
+      status: "all",
+      symbols: [symbol],
+      nested: true,
+      after: new Date(intent.submitted_at - 2000).toISOString(),
+      limit: 100,
+    });
+    const expanded = siblings.flatMap((o) => [o, ...(o.legs ?? [])]);
+    const parentRecord = siblings.find((o) => o.id === parent.id) ?? parent;
+    let child = protection.protective_order_id
+      ? await alpaca.trading.getOrder(protection.protective_order_id)
+      : parentRecord.legs?.find((o) => o.side === "sell" && o.type === "stop");
+    if (!child && protection.protective_client_id)
+      child = await alpaca.trading.getOrderByClientId(protection.protective_client_id);
+    if (child) {
+      protection.protective_order_id = child.id;
+      protection.protective_order_ids = [...new Set([...(protection.protective_order_ids ?? []), child.id])];
+    }
+    let protectiveFills = 0;
+    for (const id of protection.protective_order_ids ?? []) {
+      const owned = id === child?.id ? child : await alpaca.trading.getOrder(id);
+      const quantity = Number(owned.filled_qty);
+      if (
+        owned.symbol !== symbol ||
+        owned.side !== "sell" ||
+        typeof owned.filled_qty !== "string" ||
+        !owned.filled_qty.trim() ||
+        !Number.isFinite(quantity) ||
+        quantity < 0
+      )
+        throw new Error("Invalid protective fills");
+      protectiveFills += quantity;
+      if (quantity > 0 && db)
+        await recordOrderLoss(db, owned, Number(parent.filled_avg_price), policyConfig.cooldown_minutes_after_loss);
+    }
+    if (!terminal.has(parent.status)) {
+      // Partial quantity must not wait indefinitely for a native OTO leg to activate.
+      if (parentQty > 0 || Date.now() >= protection.expires_at || protection.closing_reason)
+        await alpaca.trading.cancelOrder(parent.id);
+      return; // cancel acknowledgement does not terminate the parent
+    }
+    if (!held) {
+      if (parentQty > 0 && (!child || !terminal.has(child.status) || Math.abs(protectiveFills - parentQty) > 1e-8))
+        return;
+      if (child && !terminal.has(child.status)) {
+        await alpaca.trading.cancelOrder(child.id);
+        return;
+      }
+      delete pendingExecutions[symbol];
+      if (parentQty > 0) deps.onSell?.(symbol, "broker protective stop filled");
+      else deps.onBuyAbandoned?.(symbol);
+      return;
+    }
+    if (
+      !Number.isFinite(Number(parent.filled_avg_price)) ||
+      Number(parent.filled_avg_price) <= 0 ||
+      held.qty > parentQty ||
+      Math.abs(held.qty + protectiveFills - parentQty) > 1e-8 ||
+      !Number.isFinite(held.avg_entry_price) ||
+      Math.abs(held.avg_entry_price - Number(parent.filled_avg_price)) > 0.01
+    )
+      throw new Error("Holding does not reconcile with protected parent");
+    if (child && !terminal.has(child.status)) {
+      if (!protection.closing_reason && confirmedProtection(child, held, protection.stop)) {
+        intent.status = "protected";
+        return;
+      }
+      await alpaca.trading.cancelOrder(child.id);
+      return;
+    }
+    const otherOpen = expanded.filter((o) => !terminal.has(o.status) && o.id !== parent.id);
+    if (otherOpen.length || siblings.length >= 100) return; // incomplete or competing order view
+    if (protection.closing_reason) {
+      // Hand off only after every protective order is broker-confirmed terminal.
+      const reason = protection.closing_reason;
+      delete pendingExecutions[symbol];
+      await sell(symbol, reason);
+      if (!pendingExecutions[symbol]) {
+        pendingExecutions[symbol] = intent;
+        await persist();
+      }
+      return;
+    }
+    // A canceled partial parent may leave no usable child. Create one stop with a
+    // persisted client ID. Timeout recovery looks up that ID, never submits another.
+    if (protection.protective_client_id && !child) return;
+    protection.protective_order_id = undefined;
+    protection.protective_client_id = `mahoraga-stop-${crypto.randomUUID()}`;
+    intent.status = "protecting";
+    await persist();
+    const stop = await placeOrder({
+      symbol,
+      qty: held.qty,
+      side: "sell",
+      type: "stop",
+      stop_price: protection.stop,
+      time_in_force: "gtc",
+      client_order_id: protection.protective_client_id,
+    });
+    protection.protective_order_id = stop.id;
+    if (terminal.has(stop.status) && stop.status !== "filled")
+      protection.closing_reason = "Protective stop rejected; flatten residual";
+    // An acknowledgement is insufficient: next reconciliation verifies open quantity.
   }
 
   async function getAccount(): Promise<Account> {
@@ -167,7 +312,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
   }
 
   async function buy(symbol: string, notional: number, reason: string): Promise<boolean> {
-    if (buyInFlight || buySubmitted || Object.keys(pendingExecutions).length > 0) {
+    if (buyInFlight || buySubmitted || hasOpeningIntent()) {
       log("PolicyBroker", "buy_blocked", { symbol, reason: "An entry is already in flight or submitted this cycle" });
       return false;
     }
@@ -179,7 +324,12 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
     }
   }
 
-  async function submitBuy(symbol: string, notional: number, reason: string): Promise<boolean> {
+  async function submitBuy(
+    symbol: string,
+    notional: number,
+    reason: string,
+    protectedBuy?: ProtectedBuy
+  ): Promise<boolean> {
     if (!symbol || symbol.trim().length === 0) {
       log("PolicyBroker", "buy_blocked", { reason: "Empty symbol" });
       return false;
@@ -195,7 +345,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
     const assetClass = isCrypto ? "crypto" : "us_equity";
     const timeInForce = isCrypto ? "gtc" : "day";
 
-    if (!isCrypto) {
+    if (!isCrypto && !protectedBuy) {
       const rejection = deps.validateBuy?.(symbol);
       if (rejection) {
         log("PolicyBroker", "buy_blocked", { symbol, reason: rejection });
@@ -231,7 +381,8 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
       asset_class: assetClass,
       side: "buy",
       notional: Math.round(notional * 100) / 100,
-      order_type: "market",
+      order_type: protectedBuy ? "limit" : "market",
+      ...(protectedBuy ? { qty: protectedBuy.quantity, limit_price: protectedBuy.limit } : {}),
       time_in_force: timeInForce,
     };
 
@@ -245,8 +396,19 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
       ]);
 
       // Do not allocate more capital while the broker is still processing an order.
-      const pending = await alpaca.trading.listOrders({ status: "open", limit: 1 });
-      if (pending.length > 0) {
+      const pending = await alpaca.trading.listOrders({ status: "open", limit: 100 });
+      const unowned = pending.filter((o) => {
+        const owner = pendingExecutions[o.symbol];
+        const position = positions.find((p) => p.symbol === o.symbol);
+        return !(
+          owner?.protected_entry &&
+          owner.status === "protected" &&
+          owner.protected_entry.protective_order_id === o.id &&
+          position &&
+          confirmedProtection(o, position, owner.protected_entry.stop)
+        );
+      });
+      if (unowned.length > 0 || pending.length >= 100) {
         log("PolicyBroker", "buy_blocked", { symbol, reason: "Open orders must settle before another entry" });
         return false;
       }
@@ -254,7 +416,11 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
         log("PolicyBroker", "buy_blocked", { symbol, reason: "Already held; no automatic pyramiding" });
         return false;
       }
-      if (!isCrypto && deps.maxBuyNotional) {
+      if (protectedBuy) {
+        if (!deps.validateProtectedEntry || (await deps.validateProtectedEntry(protectedBuy, account, positions)))
+          return false;
+      }
+      if (!isCrypto && !protectedBuy && deps.maxBuyNotional) {
         notional = Math.min(notional, deps.maxBuyNotional(account, symbol));
         if (!Number.isFinite(notional) || notional < 100) return false;
         notional = Math.floor(notional * 100) / 100;
@@ -279,7 +445,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
         });
       }
 
-      if (!isCrypto) {
+      if (!isCrypto && !protectedBuy) {
         const rejection = await deps.validateExecution?.(symbol);
         if (rejection) {
           log("PolicyBroker", "buy_blocked", { symbol, reason: rejection });
@@ -288,8 +454,9 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
       }
       // Stop may have been requested while any of the above reads were pending.
       if (deps.canSubmit && !deps.canSubmit()) return false;
-      if (Object.keys(pendingExecutions).length > 0) return false;
-      if (!isCrypto && deps.validateBuy?.(symbol)) return false;
+      if (hasOpeningIntent()) return false;
+      if (!isCrypto && !protectedBuy && deps.validateBuy?.(symbol)) return false;
+      if (protectedBuy && Date.now() >= protectedBuy.expiresAt) return false;
       const clientOrderId = `mahoraga-${crypto.randomUUID()}`;
       ownIntent = {
         symbol: orderSymbol,
@@ -298,9 +465,19 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
         submitted_at: Date.now(),
         client_order_id: clientOrderId,
         status: "submitting",
+        ...(protectedBuy
+          ? {
+              expected_qty: protectedBuy.quantity,
+              protected_entry: {
+                stop: protectedBuy.stop,
+                limit: protectedBuy.limit,
+                expires_at: protectedBuy.expiresAt,
+              },
+            }
+          : {}),
       };
       pendingExecutions[orderSymbol] = ownIntent;
-      deps.onBuyIntent?.(symbol, notional, reason, account);
+      if (!protectedBuy) deps.onBuyIntent?.(symbol, notional, reason, account);
       // Persist BEFORE HTTP: a crash or timeout must not permit duplicate orders.
       await persist();
       if (deps.canSubmit && !deps.canSubmit()) {
@@ -309,11 +486,18 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
         await persist();
         return false;
       }
-      const alpacaOrder = await alpaca.trading.createOrder({
+      const alpacaOrder = await placeOrder({
         symbol: orderSymbol,
-        notional: Math.round(notional * 100) / 100,
+        ...(protectedBuy
+          ? {
+              qty: protectedBuy.quantity,
+              limit_price: protectedBuy.limit,
+              order_class: "oto" as const,
+              stop_loss: { stop_price: protectedBuy.stop },
+            }
+          : { notional: Math.round(notional * 100) / 100 }),
         side: "buy",
-        type: "market",
+        type: protectedBuy ? "limit" : "market",
         time_in_force: timeInForce,
         client_order_id: clientOrderId,
       });
@@ -348,6 +532,31 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
     }
   }
 
+  async function buyProtected(intent: ProtectedBuy): Promise<boolean> {
+    if (!deps.validateProtectedEntry || !deps.persist || buyInFlight || buySubmitted || hasOpeningIntent())
+      return false;
+    if (
+      !/^[A-Z][A-Z0-9.-]{0,14}$/.test(intent.symbol) ||
+      !intent.reason.trim() ||
+      !Number.isSafeInteger(intent.quantity) ||
+      intent.quantity <= 0 ||
+      ![intent.limit, intent.stop, intent.expiresAt].every(Number.isFinite) ||
+      intent.stop <= 0 ||
+      intent.limit <= intent.stop ||
+      Date.now() >= intent.expiresAt ||
+      intent.expiresAt - Date.now() > 60_000 ||
+      [intent.stop, intent.limit].some((p) => Math.abs(p * 100 - Math.round(p * 100)) > 1e-7) ||
+      isCryptoSymbol(intent.symbol, deps.cryptoSymbols)
+    )
+      return false;
+    buyInFlight = true;
+    try {
+      return await submitBuy(intent.symbol, intent.quantity * intent.limit, intent.reason, intent);
+    } finally {
+      buyInFlight = false;
+    }
+  }
+
   async function sell(symbol: string, reason: string): Promise<boolean> {
     if (!symbol || symbol.trim().length === 0) {
       log("PolicyBroker", "sell_blocked", { reason: "Empty symbol" });
@@ -358,7 +567,15 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
       log("PolicyBroker", "sell_blocked", { symbol, reason: "No sell reason provided" });
       return false;
     }
-    if (pendingExecutions[symbol] || (deps.canSubmit && !deps.canSubmit())) return false;
+    if (deps.canSubmit && !deps.canSubmit()) return false;
+    const protectedIntent = pendingExecutions[symbol];
+    if (protectedIntent?.protected_entry) {
+      protectedIntent.protected_entry.closing_reason = reason;
+      protectedIntent.status = "closing_protection";
+      await persist();
+      return false; // reconciliation cancels protection before closing
+    }
+    if (pendingExecutions[symbol]) return false;
 
     // For sells (closing positions), we skip full PolicyEngine evaluation.
     // Closing a position is risk-reducing — blocking exits on kill switch
@@ -388,6 +605,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
         submitted_at: Date.now(),
         status: "submitting",
         expected_qty: holding.qty,
+        entry_basis: holding.avg_entry_price,
       };
       pendingExecutions[symbol] = ownIntent;
       await persist();
@@ -423,6 +641,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
     getClock,
     reconcile,
     buy,
+    buyProtected,
     sell,
   };
 }

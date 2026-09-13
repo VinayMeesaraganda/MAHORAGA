@@ -44,6 +44,7 @@ export interface Position {
 }
 
 export interface Order {
+  legs?: Order[];
   id: string;
   client_order_id: string;
   symbol: string;
@@ -88,6 +89,8 @@ export type OrderStatus =
   | "calculated";
 
 export interface OrderParams {
+  order_class?: "simple" | "oto";
+  stop_loss?: { stop_price: number };
   symbol: string;
   qty?: number;
   notional?: number;
@@ -211,7 +214,10 @@ export interface MarketNewsItem {
 export interface NewsParams {
   symbols?: string[];
   start?: string;
+  end?: string;
   limit?: number;
+  page_token?: string;
+  sort?: "asc" | "desc";
 }
 
 /** One row of the most-actives screener. */

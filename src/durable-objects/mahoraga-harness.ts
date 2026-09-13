@@ -55,6 +55,7 @@ import {
   SignalResearchResponseSchema,
 } from "../schemas/llm-responses";
 import { createD1Client } from "../storage/d1/client";
+import { handleResearch } from "../research/api";
 import {
   closeJournalEntry,
   createJournalEntry,
@@ -350,6 +351,10 @@ export class MahoragaHarness extends DurableObject<Env> {
             (p) => p.asset_class === "us_equity" || (p.asset_class === "us_option" && this.state.config.options_enabled)
           ),
           account
+        );
+        exits.sort(
+          (a, b) =>
+            Number(a.reason.startsWith("Adverse issuer news")) - Number(b.reason.startsWith("Adverse issuer news"))
         );
         for (const exit of exits) {
           if (!this.state.enabled) break;
@@ -1332,11 +1337,12 @@ export class MahoragaHarness extends DurableObject<Env> {
       "journal",
       "learnings",
     ];
-    if (protectedActions.includes(action)) {
+    if (protectedActions.includes(action) || action.startsWith("research/")) {
       if (!this.isAuthorized(request)) return this.unauthorizedResponse();
     }
 
     try {
+      if (action.startsWith("research/")) return handleResearch(request, this.env);
       switch (action) {
         case "catalysts":
           return this.handleCatalysts(request);

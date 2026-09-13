@@ -1,6 +1,19 @@
 import { nowISO } from "../../../lib/utils";
 import type { D1Client, RiskStateRow } from "../client";
 
+export function riskDay(value: string): string | null {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const at = Date.parse(value.includes("T") ? value : `${value.replace(" ", "T")}Z`);
+  return Number.isFinite(at)
+    ? new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/New_York",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(at)
+    : null;
+}
+
 export interface RiskState {
   kill_switch_active: boolean;
   kill_switch_reason: string | null;
@@ -28,11 +41,13 @@ export async function getRiskState(db: D1Client): Promise<RiskState> {
     };
   }
 
+  const resetDay = row.daily_loss_reset_at ? riskDay(row.daily_loss_reset_at) : null;
+  const currentDay = riskDay(nowISO())!;
   return {
     kill_switch_active: row.kill_switch_active === 1,
     kill_switch_reason: row.kill_switch_reason,
     kill_switch_at: row.kill_switch_at,
-    daily_loss_usd: row.daily_loss_usd,
+    daily_loss_usd: resetDay && resetDay < currentDay ? 0 : row.daily_loss_usd,
     daily_loss_reset_at: row.daily_loss_reset_at,
     last_loss_at: row.last_loss_at,
     cooldown_until: row.cooldown_until,
@@ -69,8 +84,12 @@ export async function setCooldown(db: D1Client, cooldownUntil: string): Promise<
 
 export async function resetDailyLoss(db: D1Client): Promise<void> {
   const now = nowISO();
+  const row = await db.executeOne<{ daily_loss_reset_at: string | null }>(
+    "SELECT daily_loss_reset_at FROM risk_state WHERE id = 1"
+  );
+  if (!row || (row.daily_loss_reset_at && riskDay(row.daily_loss_reset_at) === riskDay(now))) return;
   await db.run(
-    `UPDATE risk_state SET daily_loss_usd = 0, daily_loss_reset_at = ?, cooldown_until = NULL, updated_at = ? WHERE id = 1`,
-    [now, now]
+    `UPDATE risk_state SET daily_loss_usd = 0, daily_loss_reset_at = ?, updated_at = ? WHERE id = 1 AND daily_loss_reset_at IS ?`,
+    [riskDay(now), now, row.daily_loss_reset_at]
   );
 }

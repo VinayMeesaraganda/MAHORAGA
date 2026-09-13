@@ -7,7 +7,6 @@
 import type { Position } from "../../../core/types";
 import type { PromptTemplate, ResearchPositionPromptBuilder, ResearchSignalPromptBuilder } from "../../types";
 import { bestCatalyst, type CatalystHit } from "../helpers/catalyst";
-import { describeLearnings, type Learnings } from "../helpers/learnings";
 import { describeMacroRegime, type MacroRegime } from "../helpers/macro";
 import { describeMarketContext } from "../helpers/market";
 
@@ -33,9 +32,6 @@ SENTIMENT: ${(sentiment * 100).toFixed(0)}% bullish (sources: ${sources.join(", 
 
 CURRENT DATA:
 ${market ? describeMarketContext(market) : `- Price: $${price}\n- Liquidity and extension data: unknown`}
-
-YOUR OWN TRACK RECORD (what these setups have actually done):
-${describeLearnings(ctx.state.get<Learnings>("learnings"))}
 
 MARKET BACKDROP (measured today, not inferred from news):
 ${describeMacroRegime(ctx.state.get<MacroRegime>("macroRegime"))}

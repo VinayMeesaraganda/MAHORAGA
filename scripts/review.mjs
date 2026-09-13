@@ -129,14 +129,10 @@ for (const h of hypotheses.statistical) {
     const { t, df } = welch(xa, xb);
     const k = hypotheses.statistical.length;
     const crit = criticalT(0.05 / k, df);
-    const decisive = Number.isFinite(t) && Math.abs(t) >= crit;
     console.log(`      ${ra?.toFixed(2)}R vs ${rb?.toFixed(2)}R   t=${t.toFixed(2)} df=${df.toFixed(0)}`);
     console.log(`      threshold |t| >= ${crit.toFixed(2)} (two-sided 0.05, Bonferroni over ${k} questions)`);
-    if (!decisive) {
-      console.log(`      INCONCLUSIVE — the sample is reached but the difference is inside the noise.`);
-    } else {
-      console.log(`      ${t > 0 ? "supported" : "NOT supported"} — falsified if: ${h.falsified_if}`);
-    }
+    console.log(`      EXPLORATORY ONLY — no promotion verdict from these observational groups.`);
+    console.log(`      Require a registered review date and paired, calendar-block comparisons; exit-cause groups are selected by their outcomes.`);
     console.log(`      Caveat: trades opened in the same regime are correlated, so even this`);
     console.log(`      overstates confidence. Treat it as a floor, not a licence.`);
   }

@@ -371,24 +371,49 @@ export class AlpacaMarketDataProvider implements MarketDataProvider {
    * have to be regex-matched back to tickers the way a generic feed would.
    */
   async getNews(params: NewsParams = {}): Promise<MarketNewsItem[]> {
-    const response = await this.client.dataRequest<{ news?: RawNews[] }>("GET", "/v1beta1/news", {
-      symbols: params.symbols?.length ? params.symbols.join(",") : undefined,
-      start: params.start,
-      limit: params.limit ?? 50,
-      sort: "desc",
-    });
+    const articles = new Map<string, MarketNewsItem>();
+    let pageToken = params.page_token;
+    const seen = new Set<string>();
+    // Bounded work, explicit failure rather than a silently incomplete success.
+    for (let page = 0; page < 20; page++) {
+      const result = await this.getNewsPage({ ...params, page_token: pageToken });
+      for (const article of result.news) articles.set(`${article.id}:${article.updated_at}`, article);
+      if (!result.next_page_token) return [...articles.values()];
+      if (seen.has(result.next_page_token)) throw new Error("News pagination token repeated; coverage incomplete");
+      seen.add(result.next_page_token);
+      pageToken = result.next_page_token;
+    }
+    throw new Error("News pagination budget exceeded; coverage incomplete");
+  }
 
-    return (response.news ?? []).map((n) => ({
-      id: n.id,
-      headline: n.headline ?? "",
-      summary: n.summary ?? "",
-      author: n.author ?? "",
-      source: n.source ?? "",
-      url: n.url ?? "",
-      symbols: Array.isArray(n.symbols) ? n.symbols : [],
-      created_at: n.created_at ?? "",
-      updated_at: n.updated_at ?? "",
-    }));
+  async getNewsPage(params: NewsParams = {}): Promise<{ news: MarketNewsItem[]; next_page_token: string | null }> {
+    const response = await this.client.dataRequest<{ news?: RawNews[]; next_page_token?: string | null }>(
+      "GET",
+      "/v1beta1/news",
+      {
+        symbols: params.symbols?.length ? params.symbols.join(",") : undefined,
+        start: params.start,
+        end: params.end,
+        limit: params.limit ?? 50,
+        sort: params.sort ?? "desc",
+        page_token: params.page_token,
+      }
+    );
+    if (!Array.isArray(response.news)) throw new Error("Malformed news response; coverage unknown");
+    return {
+      next_page_token: response.next_page_token ?? null,
+      news: response.news.map((n) => ({
+        id: n.id,
+        headline: n.headline ?? "",
+        summary: n.summary ?? "",
+        author: n.author ?? "",
+        source: n.source ?? "",
+        url: n.url ?? "",
+        symbols: Array.isArray(n.symbols) ? n.symbols : [],
+        created_at: n.created_at ?? "",
+        updated_at: n.updated_at ?? "",
+      })),
+    };
   }
 
   /** Volume-ranked universe — the liquid names actually trading today. */

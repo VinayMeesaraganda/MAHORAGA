@@ -42,6 +42,20 @@ export function selectExits(ctx: StrategyContext, positions: Position[], _accoun
     const stopPct = posEntry?.stop_pct ?? ctx.config.stop_loss_pct;
     const targetPct = posEntry?.target_pct ?? ctx.config.take_profit_pct;
 
+    // Mandatory exits precede news adjudication for this issuer. The harness
+    // also services all deterministic candidates before any issuer's LLM call.
+    if (plPct <= -stopPct) {
+      exits.push({ symbol: pos.symbol, reason: `Stop loss at ${plPct.toFixed(1)}%` });
+      continue;
+    }
+    if (ctx.config.max_hold_days > 0 && posEntry) {
+      const days = (Date.now() - posEntry.entry_time) / 86_400_000;
+      if (days >= ctx.config.max_hold_days) {
+        exits.push({ symbol: pos.symbol, reason: `Time stop: held ${days.toFixed(1)} days at ${plPct.toFixed(1)}%` });
+        continue;
+      }
+    }
+
     // Adverse issuer news is the one evidence-based reason to leave before the
     // target. Placed ahead of it because a dilutive offering does not become
     // acceptable just because the position happens to be green.

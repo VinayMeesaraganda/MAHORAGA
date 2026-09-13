@@ -12,6 +12,8 @@ Latest: [runtime improvements, diagnostics and operating rules](runtime-improvem
 4. [Experiment plan](experiments.md): establish a baseline and improve it without fitting noise.
 5. [Review findings](findings.md): verified setup issues and remaining limitations.
 6. [Backlog](backlog.md): deferred work with the reasoning behind it.
+7. [Final strategy recommendation and implementation guide](earnings-continuation-implementation-guide.md): guidance continuation with news, technicals, volume, macro and cash-flow roles; explicit data, risk, execution and evaluation rules.
+8. [Guidance-continuation implementation status](guidance-continuation-status.md): shadow pipeline, operating commands, verified behavior and prerequisites before a paper pilot. Supersedes earlier setup claims where explicitly noted.
 
 ## Source inventory
 

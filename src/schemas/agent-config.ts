@@ -20,7 +20,7 @@ export const AgentConfigSchema = z
     entry_min_dollar_volume: z.number().min(0).default(5_000_000),
     entry_max_spread_bps: z.number().min(1).max(1000).default(50),
     entry_max_extension_pct: z.number().min(0).max(100).default(10),
-    entry_min_rel_volume: z.number().min(0).max(50).default(1),
+    entry_min_rel_volume: z.number().min(0).max(50).default(0),
     /**
      * Minimum percentage of the 52-week high. Short-horizon returns reverse for
      * past winners, and the crossover to continuation depends on high turnover

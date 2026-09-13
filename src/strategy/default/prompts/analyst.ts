@@ -4,7 +4,6 @@
 
 import type { Account, Position, Signal } from "../../../core/types";
 import type { AnalyzeSignalsPromptBuilder, PromptTemplate, StrategyContext } from "../../types";
-import { describeLearnings, type Learnings } from "../helpers/learnings";
 import { describeMacroRegime, type MacroRegime } from "../helpers/macro";
 
 /**
@@ -39,9 +38,6 @@ export const analyzeSignalsPrompt: AnalyzeSignalsPromptBuilder = (
   const macroHeadlines = ctx.state.get<Array<{ headline: string; source: string }>>("macroHeadlines") ?? [];
 
   const user = `Current Time: ${new Date().toISOString()}
-
-YOUR OWN TRACK RECORD:
-${describeLearnings(ctx.state.get<Learnings>("learnings"))}
 
 MARKET BACKDROP (measured today, not inferred):
 ${describeMacroRegime(ctx.state.get<MacroRegime>("macroRegime"))}

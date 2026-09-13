@@ -65,7 +65,7 @@ export const DEFAULT_CONFIG: AgentConfig = {
   entry_min_dollar_volume: 5_000_000,
   entry_max_spread_bps: 50,
   entry_max_extension_pct: 10,
-  entry_min_rel_volume: 1,
+  entry_min_rel_volume: 0,
   entry_min_pct_of_52w_high: 0,
   entry_min_range_position: 0,
   entry_require_catalyst: false,

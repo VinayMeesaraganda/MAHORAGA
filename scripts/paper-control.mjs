@@ -5,6 +5,9 @@ const vars = Object.fromEntries(readFileSync(new URL('../.dev.vars', import.meta
   .split(/\r?\n/).filter(line => line.trim() && !line.trim().startsWith('#'))
   .map(line => { const i = line.indexOf('='); return [line.slice(0, i).trim(), line.slice(i + 1).trim()]; }));
 const action = process.argv[2] || 'check';
+const fileFlag = process.argv.indexOf('--file');
+if (fileFlag >= 0 && (action !== 'apply' || !process.argv[fileFlag + 1])) throw new Error('--file requires apply and a JSON profile/patch path');
+const profileFile = fileFlag >= 0 ? process.argv[fileFlag + 1] : new URL('../config/paper-baseline.json', import.meta.url);
 const allowed = ['check', 'apply', 'config', 'status', 'logs', 'costs', 'disable', 'kill', 'enable'];
 if (!allowed.includes(action)) throw new Error(`Use: ${allowed.join(', ')}`);
 if (vars.ALPACA_PAPER !== 'true') throw new Error('ALPACA_PAPER must be exactly true.');
@@ -31,7 +34,7 @@ if (action === 'check') {
   const response = await fetch(`http://127.0.0.1:8787/agent/${action === 'apply' ? 'config' : action}`, {
     method: ['apply', 'disable', 'kill', 'enable'].includes(action) ? 'POST' : 'GET',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    ...(action === 'apply' ? { body: readFileSync(new URL('../config/paper-baseline.json', import.meta.url), 'utf8') } : {}),
+    ...(action === 'apply' ? { body: readFileSync(profileFile, 'utf8') } : {}),
     signal: AbortSignal.timeout(20000),
   });
   if (!response.ok) throw new Error(`Local worker returned HTTP ${response.status}`);
