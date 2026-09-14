@@ -42,6 +42,27 @@ describe("parseExtraBody", () => {
 });
 
 describe("OpenAIProvider extraBody", () => {
+  it("sends configured low reasoning with the requested model and JSON response format", async () => {
+    const fetchMock = mockFetch();
+    const provider = createOpenAIProvider({
+      apiKey: "k",
+      baseUrl: "https://integrate.api.nvidia.com/v1",
+      model: "openai/gpt-oss-20b",
+      extraBody: parseExtraBody('{"reasoning_effort":"low"}'),
+    });
+    await provider.complete({
+      messages: [{ role: "user", content: "Evaluate supplied evidence only" }],
+      max_tokens: 2048,
+      response_format: { type: "json_object" },
+    });
+    expect(sentBody(fetchMock)).toMatchObject({
+      model: "openai/gpt-oss-20b",
+      reasoning_effort: "low",
+      max_tokens: 2048,
+      response_format: { type: "json_object" },
+    });
+    vi.unstubAllGlobals();
+  });
   it("merges vendor fields into the request body", async () => {
     const fetchMock = mockFetch();
     const provider = createOpenAIProvider({

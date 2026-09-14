@@ -220,6 +220,10 @@ export default function App() {
   const positions = status?.positions || []
   const signals = status?.signals || []
   const logs = status?.logs || []
+  const researchFailures = [...new Set(logs.filter(log =>
+    log.agent === 'SignalResearch' && ['error', 'invalid_response'].includes(log.action) && log.symbol &&
+    Date.parse(log.timestamp) > (status?.signalResearch?.[log.symbol]?.timestamp ?? 0)
+  ).map(log => log.symbol!))]
   const costs = status?.costs || { total_usd: 0, calls: 0, tokens_in: 0, tokens_out: 0 }
   const config = status?.config
   const isMarketOpen = status?.clock?.is_open ?? false
@@ -721,8 +725,14 @@ export default function App() {
           <div className="col-span-4 md:col-span-8 lg:col-span-4">
             <Panel title="SIGNAL RESEARCH" titleRight={Object.keys(status?.signalResearch || {}).length.toString()} className="h-80">
               <div className="overflow-y-auto h-full space-y-2">
+                {researchFailures.length > 0 && (
+                  <div className="text-hud-warning text-xs p-2 border border-hud-warning/30" role="status">
+                    Recent failed research attempts: {researchFailures.join(', ')}. These are not completed analyses;
+                    eligible candidates are retried in later cycles.
+                  </div>
+                )}
                 {Object.entries(status?.signalResearch || {}).length === 0 ? (
-                  <div className="text-hud-text-dim text-sm py-4 text-center">Researching candidates...</div>
+                  <div className="text-hud-text-dim text-sm py-4 text-center">No completed research yet.</div>
                 ) : (
                   Object.entries(status?.signalResearch || {})
                     .sort(([, a], [, b]) => b.timestamp - a.timestamp)
