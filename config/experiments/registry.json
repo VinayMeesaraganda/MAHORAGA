@@ -4,7 +4,7 @@
   "first_operational_review": "2026-09-15",
   "first_performance_review_no_earlier_than": "2026-10-12",
   "performance_review_requires": "At least 20 observed market sessions; no edge conclusion from this minimum alone",
-  "broker_pilot_start": null,
+  "broker_pilot_start": "2026-09-13",
   "experiments": [
     {
       "id": "guidance-continuation",
@@ -29,6 +29,14 @@
     "Shadow plans are neither simulated fills nor broker P&L"
   ],
   "new_strategy_llm_requests_per_day": 0,
-  "cost_stress_bps_per_side": [10, 25, 50],
-  "cost_stress_status": "Registered evaluation assumptions; not automatically deducted from Alpaca equity"
+  "cost_stress_bps_per_side": [
+    10,
+    25,
+    50
+  ],
+  "cost_stress_status": "Registered evaluation assumptions; not automatically deducted from Alpaca equity",
+  "broker_pilot_activated_at": "2026-09-14T01:58:35Z",
+  "broker_pilot_authorization": "Explicit operator request; both isolated Workers read back enabled in paper mode",
+  "first_planned_paper_session": "2026-09-14",
+  "first_broker_fill_verified_at": null
 }

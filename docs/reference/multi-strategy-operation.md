@@ -2,7 +2,9 @@
 
 Implementation date: September 13, 2026. This document supersedes the earlier account-only and unwired-runtime descriptions. It does not establish profitability.
 
-Deployment readback: the existing baseline remains enabled. Both new Workers are enabled for **shadow collection and decisions**, with `executionAccepted=false`; broker orders remain disabled. They run at `https://mahoraga-guidance-continuation.raj-vinay2408.workers.dev` and `https://mahoraga-price-volume.raj-vinay2408.workers.dev`. Their APIs require header authentication, so opening those addresses without the CLI/token is not a dashboard login.
+Paper-pilot activation: the user explicitly requested all three strategies be able to submit orders to their individual Alpaca paper accounts. The baseline remains enabled. Both new Workers are configured for `enabled=true`, `mode=paper`, and `executionAuthorized=true`. `brokerFillValidation=pending` records that a real broker fill/protection lifecycle has not yet been verified. They run at `https://mahoraga-guidance-continuation.raj-vinay2408.workers.dev` and `https://mahoraga-price-volume.raj-vinay2408.workers.dev`. Their APIs require header authentication, so opening those addresses without the CLI/token is not a dashboard login.
+
+Monday September 14 macro coverage was reviewed against the official BLS September calendar and Fed meeting calendar, recorded with source excerpts and a server observation timestamp. It covers Monday's session, with normal 24-hour freshness expiry at approximately 9:53 p.m. Eastern Monday. Automatic official fetches still fail, and Finnhub's economic-calendar endpoint returned 403. If automatic access remains unavailable, a fresh official-calendar review is necessary for subsequent entries; this is not permanent unattended macro coverage. Guidance also still requires a verified event, rather than inventing one because paper mode is enabled.
 
 ## What runs
 
@@ -71,13 +73,15 @@ node scripts/experiment.mjs orders price-volume
 ```sh
 node scripts/experiment.mjs start-shadow guidance-continuation
 node scripts/experiment.mjs start-shadow price-volume
+node scripts/experiment.mjs start-paper guidance-continuation
+node scripts/experiment.mjs start-paper price-volume
 node scripts/experiment.mjs stop price-volume
 node scripts/experiment.mjs kill price-volume
 ```
 
 `stop` disables that harness and its alarms, retaining broker orders and positions. `kill` also sets that experiment's separate D1 policy switch, and remains reachable when normal API requests are rate limited. Neither command liquidates or cancels all broker orders. A stopped harness does not actively manage exits; already confirmed native stops remain broker-managed. Resume requires explicit review of broker exposure and the policy switch.
 
-Provision/deploy use `node scripts/experiment.mjs provision <strategy>` and `deploy <strategy>`. The script reads private per-account files, creates an isolated D1 database, applies migrations via binding `DB`, packages the dedicated entrypoint and uploads secrets. Deployment does not enable trading. The runtime requires both `mode=paper` and an `EXECUTION_ACCEPTANCE` secret matching the exact reported profile hash before broker execution. No such acceptance secret was installed during this implementation. Complete the broker lifecycle acceptance below first; do not use a generic `true` to bypass the gate.
+Provision/deploy use `node scripts/experiment.mjs provision <strategy>` and `deploy <strategy>`. The script reads private per-account files, creates an isolated D1 database, applies migrations via binding `DB`, packages the dedicated entrypoint and uploads secrets. Deployment alone does not enable trading. `start-paper` explicitly authorizes a paper pilot: it rechecks all three account identities, pins the deployed profile through the `PAPER_PILOT_AUTHORIZATION` secret and applies/readbacks `mode=paper`. This is an operator authorization, not a claim that a fill lifecycle passed. The legacy `EXECUTION_ACCEPTANCE` path is separate and was not asserted. Neither accepts a generic `true`. The activation CLI waits for the uploaded authorization to appear in status before configuring paper mode, and reports a sanitized error code on failure. Runtime `mode` determines execution; the embedded strategy profile's original shadow label is research metadata.
 
 ## Evidence workflow and remaining gates
 
@@ -94,7 +98,7 @@ Evidence is server-stamped on ingestion. Events must reference matching source h
 
 Direct official macro fetches currently fail. The system does not substitute an empty calendar. A bounded manual fallback accepts `CalendarReview` from `src/experiments/calendar.ts`: explicit reviewer, completeness attestation, official BLS/Fed source content, interval and event timestamps. Submit with `calendar <strategy> <file>`. This is an operator completeness assertion, visibly distinct from successful automated collection. The server stamps the review; freshness expires after 24 hours. A daily check or working official fetch is still necessary. Current rules cover CPI, Employment Situation, FOMC decisions and Fed press conferences, not every macro announcement.
 
-Before a paper pilot: verify current source coverage; ingest a qualifying guidance event for that strategy; inspect one whole-session shadow batch; then verify normal fills, partial-fill cancellation, stop activation/GTC recovery, close/protective-order coordination and restart recovery against the paper broker. Unit fixtures cover those execution branches, but no real fill lifecycle was exercised during the Sunday setup. Do not represent these tests as a profitable forward run or a completed broker acceptance.
+During the authorized paper pilot, verify current source coverage and inspect the full daily decision batch. Guidance entries require ingested qualifying evidence. Verify normal fills, partial-fill cancellation, stop activation/GTC recovery, close/protective-order coordination and restart recovery against the paper broker as qualifying orders occur. Unit fixtures cover those execution branches, but no real fill lifecycle was exercised during the Sunday setup. Do not represent authorization or these tests as a profitable forward run or completed broker acceptance.
 
 ## Evaluation and validation
 
@@ -102,6 +106,8 @@ Hypotheses and proposed review dates are in `config/experiments/registry.json`. 
 
 Validation includes TypeScript, the full regression suite, native local Worker configuration/readback, and deployed authenticated data probes. Remote probes verified three distinct accounts, $100,000 each and no holdings/orders, both new Workers, Finnhub, complete news pagination and history for all 24 symbols. Local Wrangler falls back from the requested 2026-09-13 compatibility date to its supported 2026-01-28 runtime; remote probes were therefore essential. Baseline doctor verified a parseable LLM response and reported Reddit HTTP 403. The baseline local disabled state was preserved.
 
-Final regression run: **668 tests passed in 51 files**, and type checking passed. Native local checks rejected paper mode without acceptance (HTTP 422) and successfully executed authenticated emergency shutdown (HTTP 200) while ordinary requests were rate-limited (HTTP 429). Tests also verify improved-price entries preserve the frozen dollar-risk budget and negative cash/exhausted equity do not prevent risk-reducing exits. No broker test orders were placed.
+Sunday activation readback: both new Workers completed an automatic alarm cycle with no runtime error, scheduled their next alarm, and had clear D1 emergency switches. Account pins matched distinct ACTIVE, unblocked accounts. A no-order dry run returned zero guidance events and evaluated 24 price/volume names with no allocations. All IEX quotes were stale outside market hours; 11 also had zero/invalid price or size and failed input validation. Sunday has no trading session, explaining the holding-calendar rejection for the other 13. This verifies fail-closed behavior, not Monday quote quality or a qualifying trade.
+
+Final regression run: **670 tests passed in 51 files**, and type checking passed. Native local checks rejected unauthorized paper mode (HTTP 422) and successfully executed authenticated emergency shutdown (HTTP 200) while ordinary requests were rate-limited (HTTP 429). Tests also verify improved-price entries preserve the frozen dollar-risk budget, negative cash/exhausted equity do not prevent risk-reducing exits, and paper authorization is separate from fill acceptance. No broker test orders were placed.
 
 Primary contracts: [Alpaca orders](https://docs.alpaca.markets/us/docs/orders-at-alpaca), [Finnhub earnings calendar](https://finnhub.io/docs/api/earnings-calendar), [Cloudflare alarms](https://developers.cloudflare.com/durable-objects/api/alarms/), [BLS calendar](https://www.bls.gov/schedule/), [FOMC calendar](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm).

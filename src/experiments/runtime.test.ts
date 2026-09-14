@@ -62,6 +62,22 @@ async function setup() {
   return { runtime, store, env, deps, trading };
 }
 describe("isolated paper experiment execution", () => {
+  it("enables an explicitly authorized paper pilot without claiming broker fill acceptance", async () => {
+    const { runtime, env } = await setup();
+    env.PAPER_PILOT_AUTHORIZATION = runtime.state.profileHash;
+    await runtime.configure(true, "paper");
+    expect(runtime.canExecute()).toBe(true);
+    const status = await runtime.status();
+    expect(status.executionAuthorized).toBe(true);
+    expect(status.executionAccepted).toBe(false);
+    expect(status.brokerFillValidation).toBe("pending");
+  });
+  it("rejects a pilot authorization for another profile", async () => {
+    const { runtime, env } = await setup();
+    env.PAPER_PILOT_AUTHORIZATION = "another-profile";
+    await expect(runtime.configure(true, "paper")).rejects.toThrow("authorization");
+    expect(runtime.canExecute()).toBe(false);
+  });
   it.each([
     { stop: 94, quantity: 5 },
     { stop: 93, quantity: 4 },
@@ -197,12 +213,14 @@ describe("isolated paper experiment execution", () => {
   });
   it("does not turn an enabled shadow collector into an order executor", async () => {
     const { runtime } = await setup();
+    const audit = vi.spyOn(runtime, "audit");
     await runtime.configure(true, "shadow");
+    expect(audit).toHaveBeenCalledWith("configuration", expect.objectContaining({ authorizationBasis: "none" }));
     const exits = vi.spyOn(runtime, "exits").mockResolvedValue();
     vi.spyOn(runtime, "prepare").mockResolvedValue();
     await runtime.tick();
     expect(exits).not.toHaveBeenCalled();
-    await expect(runtime.configure(true, "paper")).rejects.toThrow("acceptance");
+    await expect(runtime.configure(true, "paper")).rejects.toThrow("authorization");
   });
   it("will not switch modes while an account has open orders", async () => {
     const { runtime, env, trading } = await setup();

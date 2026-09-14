@@ -1,6 +1,6 @@
 # Guidance continuation: implementation and operation
 
-September 13 follow-up: the [three-strategy operating guide](multi-strategy-operation.md) supersedes the runtime-wiring and deployment gaps below. Guidance now has a dedicated Worker and account-pinned execution path, deployed in shadow mode. Prospective Finnhub collection is working; comparable issuer evidence and real broker lifecycle acceptance remain prerequisites. Earlier shadow-only research APIs retain their original behavior.
+September 13 follow-up: the [three-strategy operating guide](multi-strategy-operation.md) supersedes the runtime-wiring and deployment gaps below. Guidance now has a dedicated Worker and account-pinned execution path, enabled in paper mode by explicit operator authorization. Prospective Finnhub collection is working; comparable reviewed issuer evidence remains required for entries. Actual broker fill/protection validation is pending and was not asserted as part of authorization. Earlier shadow-only research APIs retain their original behavior.
 
 Implementation date: September 12, 2026. Baseline source commit: `cd6ac8e`. This implements the accepted recommendation as a **shadow research path** alongside the existing strategy. It does not activate a new trading strategy or establish profitability.
 

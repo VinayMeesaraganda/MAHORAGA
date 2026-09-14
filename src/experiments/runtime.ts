@@ -35,12 +35,18 @@ import { newsEntryVeto } from "./news-risk";
 import { evidenceAvailable } from "../schemas/earnings-event";
 
 export type StrategyId = "guidance-continuation" | "price-volume";
-export interface ExperimentEnv extends Omit<ExperimentBindings, "STRATEGY_ID" | "FINNHUB_API_KEY"> {
+export interface ExperimentEnv
+  extends Omit<
+    ExperimentBindings,
+    "STRATEGY_ID" | "FINNHUB_API_KEY" | "PAPER_PILOT_AUTHORIZATION" | "EXECUTION_ACCEPTANCE"
+  > {
   STRATEGY_ID: StrategyId;
   EXPECTED_ACCOUNT_ID: string;
   FINNHUB_API_KEY?: string;
   /** Exact execution-profile hash after lifecycle acceptance, never a generic true flag. */
   EXECUTION_ACCEPTANCE?: string;
+  /** Operator-authorized paper pilot; does not claim completed broker fill validation. */
+  PAPER_PILOT_AUTHORIZATION?: string;
 }
 export interface Store {
   get<T>(key: string): Promise<T | undefined>;
@@ -193,10 +199,13 @@ export class ExperimentRuntime {
       this.state.paused = true;
     return account;
   }
+  executionAuthorized = () =>
+    this.env.PAPER_PILOT_AUTHORIZATION === this.state.profileHash ||
+    this.env.EXECUTION_ACCEPTANCE === this.state.profileHash;
   canExecute = () =>
     this.state.enabled &&
     this.state.mode === "paper" &&
-    this.env.EXECUTION_ACCEPTANCE === this.state.profileHash &&
+    this.executionAuthorized() &&
     this.state.accountId === this.env.EXPECTED_ACCOUNT_ID;
   async configure(enabled: boolean, mode: "shadow" | "paper") {
     const epoch = this.state.controlEpoch ?? 0;
@@ -207,12 +216,21 @@ export class ExperimentRuntime {
       orders = await this.alpaca.trading.listOrders({ status: "open", limit: 100 });
     if (mode !== this.state.mode && (positions.length || orders.length || Object.keys(this.state.pending).length))
       throw Error("mode_change_with_exposure_blocked");
-    if (mode === "paper" && this.env.EXECUTION_ACCEPTANCE !== this.state.profileHash)
-      throw Error("paper_lifecycle_acceptance_required");
+    if (mode === "paper" && !this.executionAuthorized()) throw Error("paper_execution_authorization_required");
     if ((this.state.controlEpoch ?? 0) !== epoch) throw Error("configuration_interrupted_by_stop");
     this.state.mode = mode;
     this.state.enabled = enabled;
-    await this.audit("configuration", { enabled, mode, profileHash: this.state.profileHash });
+    await this.audit("configuration", {
+      enabled,
+      mode,
+      profileHash: this.state.profileHash,
+      authorizationBasis:
+        this.env.PAPER_PILOT_AUTHORIZATION === this.state.profileHash
+          ? "operator_paper_pilot"
+          : this.env.EXECUTION_ACCEPTANCE === this.state.profileHash
+            ? "legacy_execution_acceptance"
+            : "none",
+    });
     await this.persist();
     if (this.state.enabled && (this.state.controlEpoch ?? 0) === epoch) await this.store.setAlarm(Date.now() + 1000);
     else await this.store.deleteAlarm();
@@ -649,6 +667,9 @@ export class ExperimentRuntime {
       enabled: this.state.enabled,
       mode: this.state.mode,
       executionAccepted: this.env.EXECUTION_ACCEPTANCE === this.state.profileHash,
+      executionAuthorized: this.executionAuthorized(),
+      brokerFillValidation:
+        this.env.EXECUTION_ACCEPTANCE === this.state.profileHash ? "operator_acceptance_recorded" : "pending",
       paused: this.state.paused,
       lastTick: this.state.lastTick,
       nextTick: this.state.nextTick,

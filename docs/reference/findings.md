@@ -2,7 +2,7 @@
 
 ## September 13 isolated strategy implementation
 
-See [three-strategy operation](multi-strategy-operation.md) for the newly deployed guidance and price/volume runtimes. This supersedes the earlier unwired protected-order finding for those isolated Workers. Their order mode remains gated by broker acceptance. Finnhub, historical bars and news pagination passed remote probes; official macro fetches and reviewed issuer inputs remain explicit prerequisites. No strategy-performance conclusion follows from these operational checks.
+See [three-strategy operation](multi-strategy-operation.md) for the newly deployed guidance and price/volume runtimes. This supersedes the earlier unwired protected-order finding for those isolated Workers. Both are enabled in paper mode under exact-profile operator authorization; this is separate from pending real broker fill validation. Finnhub, historical bars and news pagination passed remote probes. A bounded official-calendar review covers Monday September 14; automatic official fetches still fail and later sessions need fresh coverage. Guidance requires reviewed issuer inputs. No strategy-performance conclusion follows from these operational checks.
 
 ## September 12 implementation update
 
