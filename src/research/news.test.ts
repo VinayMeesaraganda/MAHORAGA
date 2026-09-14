@@ -18,6 +18,14 @@ const article = {
   updated_at: "2026-09-10T20:00:00Z",
 } as MarketNewsItem;
 describe("news coverage and restart recovery", () => {
+  it("retains contiguous history coverage when the next incremental cycle begins", async () => {
+    const { db } = setup();
+    const getNewsPage = vi.fn().mockResolvedValue({ news: [], next_page_token: null });
+    const first = await collectNews(db, { getNewsPage }, ["AAPL"], 1800000000000);
+    const next = await collectNews(db, { getNewsPage }, ["AAPL"], 1800000600000);
+    expect(next.historyFrom).toBe(first.from);
+    expect(next.from).not.toBe(first.from);
+  });
   it("persists a page then resumes its cursor, without claiming coverage early", async () => {
     const { db } = setup();
     const getNewsPage = vi

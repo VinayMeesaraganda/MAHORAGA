@@ -5,7 +5,7 @@ import type { AlpacaProviders } from "../providers/alpaca";
 import { createPolicyBroker, type ProtectedBuy } from "./policy-broker";
 import type { PendingExecution } from "./types";
 
-function setup(pending: Record<string, PendingExecution> = {}, allow = true) {
+function setup(pending: Record<string, PendingExecution> = {}, allow = true, canSubmit?: () => boolean) {
   const trading = {
     getAccount: vi.fn().mockResolvedValue({ equity: 100000, last_equity: 100000, cash: 100000, buying_power: 100000 }),
     getPositions: vi.fn().mockResolvedValue([]),
@@ -32,6 +32,7 @@ function setup(pending: Record<string, PendingExecution> = {}, allow = true) {
     validateBuy: () => "Legacy LLM BUY verdict absent",
     validateExecution: async () => "Legacy research absent",
     validateProtectedEntry: allow ? validate : undefined,
+    canSubmit,
   });
   const intent: ProtectedBuy = {
     symbol: "TEST",
@@ -121,6 +122,22 @@ describe("protected entry policy contract", () => {
 });
 
 describe("one owner for parent, protection and liquidation", () => {
+  it("does not cancel a partial parent after harness shutdown", async () => {
+    const s = setup(pending(), true, () => false);
+    s.trading.getOrder.mockResolvedValue(parent("partially_filled", "5"));
+    s.trading.getPositions.mockResolvedValue([{ ...holding, qty: 5 }]);
+    await s.broker.reconcile!(); expect(s.trading.cancelOrder).not.toHaveBeenCalled();
+  });
+  it("stopping during stop-intent persistence prevents submission and leaves a recoverable unsent ID", async () => {
+    let running = true;
+    const s = setup(pending(), true, () => running);
+    s.trading.getOrder.mockResolvedValue(parent("canceled", "5"));
+    s.trading.getPositions.mockResolvedValue([{ ...holding, qty: 5 }]);
+    s.persist.mockImplementation(async () => { running = false; });
+    await s.broker.reconcile!();
+    expect(s.trading.createOrder).not.toHaveBeenCalled();
+    expect(s.pending.TEST!.protected_entry!.protective_client_id).toBeUndefined();
+  });
   it("reconciles the combined fills of replaced protective orders before retiring the position", async () => {
     const p = pending();
     p.TEST!.protected_entry!.protective_order_id = "second-stop";

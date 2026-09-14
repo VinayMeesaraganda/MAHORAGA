@@ -77,6 +77,10 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
   const persist = () => deps.persist?.() ?? Promise.resolve();
   const hasOpeningIntent = () => Object.values(pendingExecutions).some(entryReservationPending);
   const placeOrder = (params: Parameters<typeof alpaca.trading.createOrder>[0]) => alpaca.trading.createOrder(params);
+  const cancelOrder = async (id: string) => {
+    if (deps.canSubmit && !deps.canSubmit()) return;
+    await alpaca.trading.cancelOrder(id);
+  };
   const definitiveRejection = (error: unknown) =>
     ["UNAUTHORIZED", "FORBIDDEN", "INVALID_INPUT", "RATE_LIMITED", "NOT_FOUND"].includes(
       (error as { code?: string })?.code ?? ""
@@ -207,14 +211,14 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
     if (!terminal.has(parent.status)) {
       // Partial quantity must not wait indefinitely for a native OTO leg to activate.
       if (parentQty > 0 || Date.now() >= protection.expires_at || protection.closing_reason)
-        await alpaca.trading.cancelOrder(parent.id);
+        await cancelOrder(parent.id);
       return; // cancel acknowledgement does not terminate the parent
     }
     if (!held) {
       if (parentQty > 0 && (!child || !terminal.has(child.status) || Math.abs(protectiveFills - parentQty) > 1e-8))
         return;
       if (child && !terminal.has(child.status)) {
-        await alpaca.trading.cancelOrder(child.id);
+        await cancelOrder(child.id);
         return;
       }
       delete pendingExecutions[symbol];
@@ -236,7 +240,7 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
         intent.status = "protected";
         return;
       }
-      await alpaca.trading.cancelOrder(child.id);
+      await cancelOrder(child.id);
       return;
     }
     const otherOpen = expanded.filter((o) => !terminal.has(o.status) && o.id !== parent.id);
@@ -255,10 +259,17 @@ export function createPolicyBroker(deps: PolicyBrokerDeps): StrategyContext["bro
     // A canceled partial parent may leave no usable child. Create one stop with a
     // persisted client ID. Timeout recovery looks up that ID, never submits another.
     if (protection.protective_client_id && !child) return;
+    if (deps.canSubmit && !deps.canSubmit()) return;
     protection.protective_order_id = undefined;
     protection.protective_client_id = `mahoraga-stop-${crypto.randomUUID()}`;
     intent.status = "protecting";
     await persist();
+    if (deps.canSubmit && !deps.canSubmit()) {
+      // No request was made. Clear only this unsent ID so restart can protect the holding.
+      protection.protective_client_id = undefined;
+      await persist();
+      return;
+    }
     const stop = await placeOrder({
       symbol,
       qty: held.qty,

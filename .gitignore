@@ -6,6 +6,7 @@
 # Secrets & Configuration (NEVER COMMIT THESE)
 # -----------------------------------------------------------------------------
 .dev.vars
+.paper-accounts/
 .env
 .env.*
 !.env.example

@@ -1,5 +1,9 @@
 # Review findings and verification
 
+## September 13 isolated strategy implementation
+
+See [three-strategy operation](multi-strategy-operation.md) for the newly deployed guidance and price/volume runtimes. This supersedes the earlier unwired protected-order finding for those isolated Workers. Their order mode remains gated by broker acceptance. Finnhub, historical bars and news pagination passed remote probes; official macro fetches and reviewed issuer inputs remain explicit prerequisites. No strategy-performance conclusion follows from these operational checks.
+
 ## September 12 implementation update
 
 The sections below include historical observations. [Guidance-continuation implementation status](guidance-continuation-status.md) is the current record of this change.

@@ -4,6 +4,8 @@ import { hash } from "./ledger";
 
 export interface Coverage {
   from: string;
+  /** Earliest contiguous successfully collected history; `from` is the current page cycle. */
+  historyFrom?: string;
   through: string | null;
   end: string;
   pageToken: string | null;
@@ -29,6 +31,7 @@ export async function collectNews(
       ? old
       : {
           from: new Date(old?.through ? Date.parse(old.through) - 300_000 : now - 7 * 86_400_000).toISOString(),
+          historyFrom: old?.historyFrom ?? old?.from ?? new Date(now - 7 * 86_400_000).toISOString(),
           through: old?.through ?? null,
           end: new Date(now).toISOString(),
           pageToken: null,

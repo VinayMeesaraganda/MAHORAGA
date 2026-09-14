@@ -56,7 +56,7 @@ const response = (data: unknown, status = 200) =>
 /** Called only behind the existing authenticated, rate-limited Durable Object router.
  * No endpoint in this module submits broker orders or enables the trading harness.
  */
-export async function handleResearch(request: Request, env: Env, now = Date.now()): Promise<Response> {
+export async function handleResearch(request: Request, env: Pick<Env, "DB" | "ALPACA_API_KEY" | "ALPACA_API_SECRET" | "ALPACA_PAPER">, now = Date.now()): Promise<Response> {
   const db = createD1Client(env.DB),
     action = new URL(request.url).pathname.split("/").at(-1);
   if (request.method === "GET") {

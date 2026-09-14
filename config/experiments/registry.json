@@ -1,0 +1,34 @@
+{
+  "registered_at": "2026-09-13",
+  "first_planned_shadow_session": "2026-09-14",
+  "first_operational_review": "2026-09-15",
+  "first_performance_review_no_earlier_than": "2026-10-12",
+  "performance_review_requires": "At least 20 observed market sessions; no edge conclusion from this minimum alone",
+  "broker_pilot_start": null,
+  "experiments": [
+    {
+      "id": "guidance-continuation",
+      "hypothesis": "A comparable EPS beat plus a verified increase in issuer revenue guidance can continue after a strong completed reaction session.",
+      "profile": "src/strategy/guidance-continuation/config.ts",
+      "runtime_profile": "src/experiments/runtime.ts:executionProfile",
+      "review_dependency": "Prospective consensus and reviewed issuer evidence; unknown accounting basis cannot qualify"
+    },
+    {
+      "id": "price-volume",
+      "hypothesis": "A liquid completed-session breakout confirmed by elevated daily volume can continue without a narrative or LLM score.",
+      "profile": "src/strategy/price-volume/index.ts",
+      "runtime_profile": "src/experiments/runtime.ts:executionProfile",
+      "review_dependency": "Calendar, complete regular-session history and current quote/news coverage"
+    }
+  ],
+  "rules": [
+    "Never reset account history or conceal failed trials",
+    "No hot-streak sizing or parameter tuning during the registered evaluation",
+    "Report exposure, drawdown, costs, gaps and source failures alongside returns",
+    "Compare same-date cash and broad-market benchmarks before claiming improvement",
+    "Shadow plans are neither simulated fills nor broker P&L"
+  ],
+  "new_strategy_llm_requests_per_day": 0,
+  "cost_stress_bps_per_side": [10, 25, 50],
+  "cost_stress_status": "Registered evaluation assumptions; not automatically deducted from Alpaca equity"
+}

@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "REPLACE_WITH_ISOLATED_EXPERIMENT_NAME",
+  "main": "../../src/experiments/worker.ts",
+  "compatibility_date": "2026-09-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": { "ALPACA_PAPER": "true", "STRATEGY_ID": "price-volume" },
+  "durable_objects": { "bindings": [{ "name": "EXPERIMENT", "class_name": "ExperimentHarness" }] },
+  "migrations": [{ "tag": "experiment-v1", "new_sqlite_classes": ["ExperimentHarness"] }],
+  "d1_databases": [{ "binding": "DB", "database_name": "REPLACE_WITH_ISOLATED_DB", "database_id": "REPLACE_WITH_D1_ID", "migrations_dir": "../../migrations" }],
+  "observability": { "enabled": true, "head_sampling_rate": 0.1, "traces": { "enabled": true, "head_sampling_rate": 0.01 } },
+  "triggers": { "crons": [] }
+}

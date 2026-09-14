@@ -11,7 +11,7 @@ export interface AlpacaProviders {
   options: AlpacaOptionsProvider;
 }
 
-export function createAlpacaProviders(env: Env): AlpacaProviders {
+export function createAlpacaProviders(env: Pick<Env, "ALPACA_API_KEY" | "ALPACA_API_SECRET" | "ALPACA_PAPER">): AlpacaProviders {
   const config: AlpacaClientConfig = {
     apiKey: env.ALPACA_API_KEY,
     apiSecret: env.ALPACA_API_SECRET,

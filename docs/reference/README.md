@@ -14,6 +14,8 @@ Latest: [runtime improvements, diagnostics and operating rules](runtime-improvem
 6. [Backlog](backlog.md): deferred work with the reasoning behind it.
 7. [Final strategy recommendation and implementation guide](earnings-continuation-implementation-guide.md): guidance continuation with news, technicals, volume, macro and cash-flow roles; explicit data, risk, execution and evaluation rules.
 8. [Guidance-continuation implementation status](guidance-continuation-status.md): shadow pipeline, operating commands, verified behavior and prerequisites before a paper pilot. Supersedes earlier setup claims where explicitly noted.
+9. [Paper experiment accounts](experiment-accounts.md): verified account isolation, private credential locations and readiness of the two new experiments.
+10. [Three-strategy operation](multi-strategy-operation.md): dedicated Workers, deterministic strategies, Finnhub, risk controls, commands and remaining pilot gates.
 
 ## Source inventory
 

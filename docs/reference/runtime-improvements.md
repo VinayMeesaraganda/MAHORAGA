@@ -2,6 +2,8 @@
 
 This document supersedes the initial runtime findings where noted.
 
+September 13 multi-strategy implementation: [three-strategy operation](multi-strategy-operation.md) now describes the separately deployed guidance and price/volume Workers, verified Finnhub access, source coverage, persistent broker state and remaining pilot prerequisites. Shared broker reconciliation now respects a harness stop before cancellation and replacement-stop submission, including a stop arriving during persistence. Existing baseline strategy parameters are preserved.
+
 September 13 follow-up: the [guidance-continuation implementation status](guidance-continuation-status.md) records the current shadow workflow, corrected volume inputs, mandatory-exit ordering and broker-fill loss accounting. It supersedes older descriptions of those behaviors below. The challenger remains disabled for broker orders; its remaining data and execution prerequisites are explicit there.
 
 ## Active paper profile
